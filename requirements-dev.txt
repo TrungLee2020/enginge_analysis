@@ -1,0 +1,11 @@
+# requirements-dev.txt — GPR Global Engine (dev + backtest)
+# Kéo toàn bộ runtime rồi thêm công cụ dev và backtest.
+-r requirements.txt
+
+# --- Backtest engine (G3) ---
+vectorbt>=0.26
+
+# --- Dev / test / notebook ---
+pytest>=8.0
+jupyterlab>=4.0
+ruff>=0.5

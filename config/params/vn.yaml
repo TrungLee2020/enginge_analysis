@@ -1,0 +1,10 @@
+# Tham so tang 3 cho Viet Nam. theta_* KHONG dien tay — uoc luong tu tier3_country, ghi lai sau khi fit.
+country: VN
+market_series: VNINDEX
+direct_shock: GPRC_VNM_ORTH        # orthogonalized khoi global (Lop 4a)
+macro_channels: [oil, dxy, vix, us10y]
+controls: [vnindex_lag1, liquidity_hose]
+market:
+  price_limit_pct: 7.0
+  settlement: "T+2.5"
+  lot_size: 100

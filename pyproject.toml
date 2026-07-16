@@ -1,0 +1,29 @@
+[project]
+name = "gpr-engine"
+version = "0.1.0"
+description = "GPR Global Engine — geopolitical risk quantification for financial markets"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "statsmodels>=0.14",
+    "linearmodels>=6.0",
+    "arch>=6.3",
+    "pyyaml>=6.0",
+    "openai>=1.40",
+]
+
+[project.optional-dependencies]
+backtest = ["vectorbt>=0.26"]
+dev = ["pytest>=8.0", "jupyterlab>=4.0", "ruff>=0.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gpr_engine"]

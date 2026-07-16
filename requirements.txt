@@ -1,0 +1,30 @@
+# requirements.txt — GPR Global Engine (runtime)
+# Nguồn chân lý là pyproject.toml. File này giữ đồng bộ với [project.dependencies]
+# để pip install -r requirements.txt (môi trường không dùng build backend).
+# Cài đầy đủ dev: pip install -r requirements-dev.txt
+
+# --- Data / IO ---
+pandas>=2.0
+numpy>=1.26
+openpyxl>=3.1          # đọc .xlsx
+xlrd>=2.0              # đọc .xls (file GPR daily/monthly hiện tại)
+pyyaml>=6.0
+
+# --- Database ---
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+
+# --- Econometrics (chân A: LP, panel/TVP-VAR, GARCH) ---
+statsmodels>=0.14
+linearmodels>=6.0
+arch>=6.3
+
+# --- Ingest thị trường (G1.3: market_data.py) ---
+yfinance>=0.2.40       # Oil/Brent, DXY, VIX, US10Y fallback
+pandas-datareader>=0.10  # FRED
+
+# --- LLM scoring (chân B: statement_scorer.py) ---
+openai>=1.40
+
+# --- Viz cho notebook khám phá (G1.4) ---
+matplotlib>=3.8

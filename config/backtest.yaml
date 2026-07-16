@@ -1,0 +1,59 @@
+# backtest.yaml — CẤU HÌNH KHÓA CỨNG
+#
+# LỊCH SỬ: bản v1 dùng `oos_start: 2023-01-01` làm khóa duy nhất. Review `docs/08` §4.8 chỉ ra
+# một cửa sổ OOS đơn không đủ: nếu cùng cửa sổ đó vừa dùng chọn feature, chọn chân B/C, sửa
+# rubric, chọn model, thì nó đã thành in-sample trên thực tế. Thay bằng split 4 tầng
+# (`docs/09` §2.7). Việc phá khóa cũ là HỢP LỆ đúng một lần, vì tính đến 2026-07-16 CHƯA CÓ
+# backtest nào chạy (`docs/reports/` mới chỉ có G2a) — khóa chưa từng được tiêu.
+# KỂ TỪ ĐÂY: mọi mốc dưới đây khóa cứng. CI nên reject mọi thay đổi vào các mốc này.
+
+split:
+  development:   ["2015-01-01", "2020-12-31"]   # tự do thử, sửa, khám phá
+  validation:    ["2021-01-01", "2023-12-31"]   # chọn model/feature/strategy
+  pseudo_oos:    ["2024-01-01", "2025-12-31"]   # walk-forward, gần OOS nhưng đã nhìn thấy
+  final_holdout: ["2026-01-01", "2026-06-30"]   # KHÓA — chạm ĐÚNG 1 LẦN, cuối cùng
+
+# Kỷ luật final holdout (điểm dễ vi phạm nhất — vi phạm là mất toàn bộ giá trị của nó):
+#   - Chạm đúng 1 lần, sau khi mọi quyết định model đã chốt trên development+validation.
+#   - Sau khi chạm: KHÔNG sửa model dựa trên kết quả. Kết quả xấu = báo cáo kết quả xấu.
+#   - Đặt `touched: true` + ghi git commit khi đã chạm. CI reject nếu touched=true mà model đổi.
+final_holdout_touched: false
+final_holdout_touched_commit: null
+
+walk_forward:                  # áp dụng trong pseudo_oos
+  train_years: 3
+  test_years: 1
+  step_months: 12
+  purge_days: 10               # cắt bỏ quanh ranh giới train/test — chống leakage do horizon chồng lấn
+  embargo_days: 10             # (López de Prado) bắt buộc vì IC horizon tới 60 ngày
+
+market:                        # đặc thù HOSE
+  price_limit_pct: 7.0
+  settlement: "T+2.5"
+  lot_size: 100
+  fee_pct: 0.15
+  slippage_pct: 0.10
+
+metrics_horizons_days: [5, 20, 60]   # forward-return horizons cho IC
+max_free_params_per_strategy: 3      # kỷ luật chống overfit
+
+# Cổng G3 (sửa theo docs/08 §4.8, docs/09 §2.7). Bỏ "IC > 0.03" làm tiêu chí đơn:
+# một ngưỡng cố định không nói gì nếu không kèm CI, và khuyến khích săn tìm cho đủ ngưỡng.
+gates:
+  require_incremental_ic_positive: true   # so với baseline KHÔNG dùng GPR, không phải so với 0
+  require_ci_reported: true               # CI cho IC và cho chênh lệch Sharpe
+  require_regime_stability: true          # dương ở nhiều regime, không chỉ 1 giai đoạn
+  require_positive_after_costs: true      # sau phí + slippage
+  deflated_sharpe: true                   # Bailey-López de Prado, phạt số lần thử
+  multiple_testing: "hansen_spa"          # Hansen SPA / White Reality Check
+  bootstrap: "block"                      # block bootstrap, giữ autocorrelation
+
+# Baseline bắt buộc để so — câu hỏi thật là "GPR thêm được gì SAU KHI đã biết VIX/DXY/Oil?"
+benchmarks:
+  - buy_and_hold
+  - vix_only
+  - dxy_only
+  - oil_only
+  - momentum
+  - volatility
+  - non_gpr_combined
