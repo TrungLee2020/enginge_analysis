@@ -1,10 +1,33 @@
-# Tham so tang 3 cho Viet Nam. theta_* KHONG dien tay — uoc luong tu tier3_country, ghi lai sau khi fit.
+# Tham so tang 3 cho Viet Nam (docs/07v2 §5.1 — ba he so β/θ/λ).
+# He so KHONG dien tay — uoc luong tu tier3_country roi ghi lai sau khi fit (CLAUDE.md #8).
+#
+# HAI TRACK RIENG (CLAUDE.md #10 — KHONG forward-fill monthly → daily):
+#   - daily_track:   GPRC_VNM la MONTHLY nen KHONG duoc dung o day. Daily country
+#     shock chi co khi co AI-GPR daily / bilateral daily / corpus bao Viet (V-phase)
+#     → direct_shock: null cho toi luc do; tier3 chay voi beta + theta thoi.
+#   - monthly_track: GPRC_VNM⊥ (orthogonalized, innovation) lam domestic-direct.
+# Moi shock la INNOVATION (CLAUDE.md #9) — hau to _INNOV do G2.0 (shocks.py) sinh.
+
 country: VN
 market_series: VNINDEX
-direct_shock: GPRC_VNM_ORTH        # orthogonalized khoi global (Lop 4a)
-macro_channels: [oil, dxy, vix, us10y]
+
+daily_track:
+  global_shocks: [GPRD_INNOV]          # β — global-direct (innovation, G2.0)
+  direct_shock: null                    # λ — CHUA CO daily VN shock (xem ghi chu tren)
+  macro_channels: [oil, dxy, vix, us10y]
+
+monthly_track:
+  global_shocks: [GPR_INNOV]           # β — GPR global monthly innovation
+  direct_shock: GPRC_VNM_ORTH_INNOV    # λ — orthogonalized (07v2 §4.1) roi moi innovation
+  macro_channels: [oil, dxy, vix, us10y]
+
 controls: [vnindex_lag1, liquidity_hose]
-market:
+
+market:                                 # dac thu HOSE (backtest tang 3)
   price_limit_pct: 7.0
   settlement: "T+2.5"
   lot_size: 100
+
+# fitted:            # tier3 ghi vao day sau khi fit — kem data_version + git commit.
+#   daily_track: {}
+#   monthly_track: {}
