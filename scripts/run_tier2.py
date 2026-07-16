@@ -1,16 +1,18 @@
 """run_tier2.py — chay TANG 2 (G2a) end-to-end offline, sinh deliverable.
 
-🔬 Research runner (docs/05 G2a). KHONG service hoa. Doc GPR daily tu file +
-macro tu FRED (cache), uoc luong Local Projection tang 2, xuat:
-  - docs/reports/G2a_global_macro.md   (deliverable "Global Macro Impact")
-  - docs/reports/figs/irf_<macro>.png  (do thi IRF)
-  - docs/reports/data/tier2_irf.csv    (bang γ day du)
+🔬 Research runner (docs/05 G2a, gate theo docs/09 §2.5). KHONG service hoa.
+Doc GPR daily tu file + macro tu FRED (cache), uoc luong Local Projection tang 2, xuat:
+  - docs/reports/G2a_<shock_type>_<data_version>.md   (KHONG bao gio ghi de)
+  - docs/reports/figs/irf_<macro>_<shock>_<shock_type>.png
+  - docs/reports/data/tier2_irf_<shock_type>_<data_version>.csv
 
 Chay:
-    python scripts/run_tier2.py                 # dung cache neu co
-    python scripts/run_tier2.py --refresh       # keo lai FRED
-    python scripts/run_tier2.py --horizon 20    # gioi han horizon
+    python scripts/run_tier2.py                        # level (doi chung), cache
+    python scripts/run_tier2.py --shock-method innovation   # can G2.0 (docs/10 D2)
+    python scripts/run_tier2.py --refresh --horizon 20
 
+Quy tac gate (sua theo review 08 §4.6): may KHONG tu phan GO/NO-GO — report co muc
+Human review; run level tu danh dau INELIGIBLE (CLAUDE.md #9).
 Moi ket qua ghi kem data_version (hash file GPR) + git commit (docs/05 DONE #3).
 """
 from __future__ import annotations
@@ -62,13 +64,10 @@ MACRO_LABEL = {
     "vix": "VIX (level)",
     "us10y": "ΔUS10Y (yield %)",
 }
-# Ky vong tu literature (dau hieu ky vong neu GPR LEO THANG rui ro):
-LIT_EXPECT = {
-    "oil": "dương (shock đẩy giá dầu lên — kênh energy, Caldara-Iacoviello)",
-    "dxy": "dương (flight-to-safety vào USD)",
-    "vix": "dương (risk-off, biến động tăng)",
-    "us10y": "âm/mơ hồ (flight-to-quality kéo yield xuống, nhưng lạm phát dầu đẩy lên)",
-}
+
+# Loai shock -> co du dieu kien ket luan gate khong (CLAUDE.md #9: shock = innovation).
+# Level-based van chay duoc (doi chung/lich su) nhung report tu danh dau KHONG ket luan.
+GATE_ELIGIBLE_SHOCK_TYPES = {"innovation"}
 
 
 def _git_commit() -> str:
@@ -101,36 +100,41 @@ def plot_irf(irf: pd.DataFrame, macro: str, shock: str, out: Path) -> None:
     plt.close(fig)
 
 
-# Dau γ ky vong (neu GPR = leo thang rui ro): oil+, vix+, us10y mo ho.
-EXPECT_SIGN = {"oil": +1, "dxy": +1, "vix": +1, "us10y": 0}
+def gate_checklist(irf: pd.DataFrame, shock: str, shock_type: str) -> tuple[str, list[str]]:
+    """Cong G2a — 6 tieu chi (docs/09 §2.5, thay gate 'dung dau literature' cu).
 
+    BO tieu chi ep dau ky vong (review 08 §4.6 — confirmation bias: trade war co the
+    lam dau GIAM do cau yeu; ep mot dau la sai). May chi cham cac tieu chi co hoc:
+      (1) pipeline dung        — precondition, ghi nhan tu metadata
+      (2) IRF on dinh qua spec — bang robustness sub-sample trong report
+      (3) CI bao day du        — luon co trong bang IRF
+      (5) ket qua null van luu — moi kenh deu ghi, ke ca khong y nghia
+    Tieu chi (4) 'dau & do lon CO giai thich kinh te' va (6) 'channel-specific >
+    generic khi phu hop' la cua NGUOI REVIEW — may khong tu phan GO/NO-GO.
 
-def gate_verdict(irf: pd.DataFrame, shock: str) -> tuple[str, list[str]]:
-    """Cong G2a — danh gia TRUNG THUC. Khong chi hoi 'co p<0.10' ma hoi
-    'γ co y nghia VA DUNG DAU ky vong'. γ y nghia nhung SAI DAU (vd VIX am) la
-    canh bao spec/nhan qua nguoc, khong tinh la pass.
-
-    Tra ve (verdict, notes). verdict GO chi khi it nhat 1 kenh co γ y nghia dung dau.
+    Verdict toi da tu may: 'PENDING HUMAN REVIEW'. Neu shock la level (khong phai
+    innovation) -> 'INELIGIBLE': khong duoc dung ket luan gate (CLAUDE.md #9).
     """
     notes = []
-    n_correct_sig = 0
     for M in MACRO:
         sub = irf[(irf["macro_var"] == M) & (irf["shock"] == shock)]
         sig = sub[sub["pvalue"] < 0.10]
-        exp = EXPECT_SIGN.get(M, 0)
         if not len(sig):
             notes.append(f"- **{MACRO_LABEL.get(M, M)}**: không horizon nào p<0.10 "
-                         f"→ không có phản ứng rõ. Kỳ vọng: {LIT_EXPECT[M]}.")
+                         f"— kết quả null, VẪN LƯU (tiêu chí 5).")
             continue
         peak = sig.loc[sig["beta"].abs().idxmax()]
-        sign_ok = exp == 0 or (peak["beta"] > 0) == (exp > 0)
-        n_correct_sig += int(sign_ok and exp != 0)
-        flag = "✔ đúng dấu" if sign_ok else "⚠ **SAI DẤU so với kỳ vọng** (co-move ngược / spec)"
         notes.append(
             f"- **{MACRO_LABEL.get(M, M)}**: {len(sig)}/{len(sub)} horizon p<0.10; "
             f"đỉnh |γ| tại h={int(peak['horizon'])} (γ={peak['beta']:+.4f}, "
-            f"p={peak['pvalue']:.3f}) — {flag}. Kỳ vọng: {LIT_EXPECT[M]}.")
-    verdict = "GO" if n_correct_sig >= 1 else "NO-GO / REVIEW"
+            f"p={peak['pvalue']:.3f}). Dấu và độ lớn CẦN GIẢI THÍCH KINH TẾ "
+            f"(tiêu chí 4 — người review; KHÔNG ép trùng kỳ vọng literature).")
+    if shock_type not in GATE_ELIGIBLE_SHOCK_TYPES:
+        verdict = "INELIGIBLE — shock là LEVEL, không phải innovation (CLAUDE.md #9); " \
+                  "kết quả chỉ dùng đối chứng, KHÔNG kết luận gate"
+    else:
+        verdict = "PENDING HUMAN REVIEW — máy đã chấm tiêu chí 1/2/3/5; " \
+                  "người review quyết tiêu chí 4/6 rồi ghi GO/NO-GO + lý do vào report này"
     return verdict, notes
 
 
@@ -187,14 +191,23 @@ def vix_robustness_md(panel: pd.DataFrame, macro_lags: int,
 def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     REPORTS.mkdir(parents=True, exist_ok=True)
     shock_primary = DEFAULT_SHOCKS[0]  # GPRD
-    verdict, notes = gate_verdict(irf, shock_primary)
+    shock_type = meta["shock_type"]
+    verdict, notes = gate_checklist(irf, shock_primary, shock_type)
     macro_std = {M: float(panel[M].std()) for M in MACRO if M in panel.columns}
 
     parts = []
-    parts.append("# G2a — Global Macro Impact (Tầng 2 cascade)\n")
+    parts.append(f"# G2a — Global Macro Impact (Tầng 2 cascade) — shock: {shock_type}\n")
     parts.append("> 🔬 Research deliverable. Local Projection (Jordà 2005), "
-                 "docs/07 §3. Sinh tự động bởi `scripts/run_tier2.py`.\n")
+                 "docs/07_formulas_reference_v2.md §3. Sinh tự động bởi `scripts/run_tier2.py`.\n")
+    if shock_type not in GATE_ELIGIBLE_SHOCK_TYPES:
+        parts.append("> ⚠️ **Shock trong run này là LEVEL (transform: "
+                     f"{meta['shock_method']}), không phải innovation.** Theo "
+                     "CLAUDE.md #9 / review 08 §4.4, hệ số của level KHÔNG đọc được "
+                     "là 'tác động của cú sốc' — level autocorrelated cao nên "
+                     "'coincident' gần như là kết quả mặc định. Run này chỉ dùng "
+                     "làm ĐỐI CHỨNG với run innovation (G2.0).\n")
     parts.append("## Metadata\n")
+    parts.append(f"- **shock_type**: `{shock_type}` (transform: `{meta['shock_method']}`)")
     parts.append(f"- **data_version** (sha256 GPR daily): `{meta['data_version']}`")
     parts.append(f"- **git commit**: `{meta['git_commit']}`")
     parts.append(f"- **generated_at**: {meta['generated_at']}")
@@ -212,12 +225,18 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
                  "(params riêng nước) ước lượng sau.\n")
 
     parts.append(f"## Cổng G2a: **{verdict}**\n")
-    parts.append("Tiêu chí (đánh giá **trung thực**): γ phải có ý nghĩa **VÀ đúng "
-                 "dấu kỳ vọng**. γ có ý nghĩa nhưng sai dấu (vd VIX âm) là cảnh báo "
-                 "co-move ngược / lỗi spec — KHÔNG tính là pass. Shock chính "
-                 f"`{shock_primary}` (đã chuẩn hóa z-score):\n")
+    parts.append("Gate 6 tiêu chí (docs/09 §2.5 — ĐÃ BỎ tiêu chí 'đúng dấu "
+                 "literature', review 08 §4.6): (1) pipeline đúng · (2) IRF ổn định "
+                 "qua spec · (3) CI đầy đủ · (4) dấu/độ lớn CÓ giải thích kinh tế "
+                 "(người review, không ép trùng kỳ vọng) · (5) null vẫn lưu · "
+                 "(6) channel-specific > generic khi phù hợp. Shock chính "
+                 f"`{shock_primary}`:\n")
     parts.extend(notes)
     parts.append("")
+    parts.append("### Human review (điền tay sau khi đọc kết quả)\n")
+    parts.append("- Tiêu chí 4 — giải thích kinh tế cho từng kênh có ý nghĩa: _chưa điền_")
+    parts.append("- Tiêu chí 6 — so channel-specific (chờ S-GPR): _chưa áp dụng_")
+    parts.append("- **Kết luận người review (GO/NO-GO + lý do + ngày + người):** _chưa điền_\n")
 
     parts.append(f"## Bảng IRF (γ) — shock `{shock_primary}`\n")
     parts.append("γ = impulse response: phản ứng biến vĩ mô tại h ngày sau shock "
@@ -231,7 +250,7 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     parts.append("## Đồ thị IRF\n")
     for M in MACRO:
         parts.append(f"### {MACRO_LABEL.get(M, M)}\n")
-        parts.append(f"![IRF {M}](figs/irf_{M}_{shock_primary}.png)\n")
+        parts.append(f"![IRF {M}](figs/irf_{M}_{shock_primary}_{shock_type}.png)\n")
 
     parts.append("## KĐ3 — Threat vs Act (β_std theo nhiều horizon)\n")
     parts.append("β_std = γ/std(macro) cho GPRD_THREAT vs GPRD_ACT — act có **mạnh & "
@@ -255,19 +274,18 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
                          + " | ".join(cells) + " |")
     parts.append("")
 
-    parts.append("## Robustness — dấu γ(VIX) qua sub-sample\n")
-    parts.append("β_std VIX theo GPRD trên các giai đoạn. Nếu dấu âm ổn định qua "
-                 "mọi sub-sample → không phải artifact của 1 giai đoạn (vd khủng "
-                 "hoảng 2008), củng cố kết luận GPRD coincident/lagging. `*` = p<0.10.\n")
+    parts.append("## Robustness — γ(VIX) qua sub-sample (tiêu chí 2: ổn định qua spec)\n")
+    parts.append("β_std VIX theo GPRD trên các giai đoạn. Dấu/độ lớn ổn định qua "
+                 "sub-sample → không phải artifact của 1 giai đoạn. Diễn giải dấu "
+                 "là việc của người review (tiêu chí 4). `*` = p<0.10.\n")
     parts.append(vix_robustness_md(panel, meta["macro_lags"]))
     parts.append("")
 
     parts.append("## Ghi chú biến đổi & nhận diện (đọc kỹ)\n")
-    parts.append("- **Shock chuẩn hóa, KHÔNG log1p.** docs/07 §0 bắt buộc log(1+GPR) "
-                 "vì phân phối *country-GPR nước nhỏ* (mean/std ≈ 0.05, lệch phải). "
-                 "GPRD **toàn cầu daily** (~10..370) không thuộc phân phối đó; log1p "
-                 "ép 370→5.9, làm phẳng spike khủng hoảng. Nên dùng z-score → γ đọc "
-                 "là 'phản ứng / 1σ shock'. Quy ước log1p vẫn giữ cho country-GPR ở tầng 3.")
+    parts.append(f"- **Transform shock**: `{meta['shock_method']}`. Với level: z-score "
+                 "giữ biên độ spike (log1p ép 370→5.9 — chỉ dành cho country-GPR "
+                 "nước nhỏ, docs/07v2 §0). Với innovation (G2.0): shock đã là phần "
+                 "residual, đọc γ là 'phản ứng / 1 đơn vị tin mới'.")
     parts.append("- **Panel lưới business-day liên tục + complete-case một lần** "
                  "(data_files.build_tier2_panel): tránh lỗi trước đây khi NaN rải rác "
                  "khiến mỗi horizon chạy trên mẫu khác nhau và AR-lag nhảy qua khe NaN "
@@ -277,21 +295,25 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
                  "đủ 4 kênh macro 1990+ thay vì chỉ 2006+ (broad-only).\n")
 
     parts.append("## Giới hạn & bước sau\n")
-    parts.append("- **GPR là coincident, chưa thấy leading**: γ đương thời (h=0) yếu; "
-                 "VIX tương lai có xu hướng *mean-revert* sau spike GPRD (γ âm ở h dài) "
-                 "— GPRD hay xảy ra *tại* đỉnh biến động, không dẫn trước. Đây là dữ "
-                 "kiện quan trọng cho KĐ5 (lead-lag) ở G2b, không phải lỗi.")
     parts.append("- Chưa orthogonalize giữa các shock (GPRD chứa cả threat+act); "
-                 "mediation đầy đủ chờ tầng 3 (G2b).")
+                 "transmission decomposition đầy đủ chờ tầng 3 (G2b).")
     parts.append("- Chưa tách theo `channel` (energy/trade) — cần S-GPR (G5). "
-                 "Khi có, chạy lại theo channel để xác nhận energy→γ_oil cao.")
-    parts.append("- **Tiếp theo**: dù cổng ra sao, G2a là deliverable độc lập. "
-                 "G2b `tier3_country.py` + `config/params/vn.yaml` (mediation "
-                 "Direct/Indirect cho VN-Index) là bước kế.\n")
+                 "Khi có, chạy lại theo channel (tiêu chí 6 của gate).")
+    parts.append("- Diễn giải kết quả (leading/coincident, cơ chế kinh tế của dấu) "
+                 "thuộc mục Human review phía trên — KHÔNG hard-code vào script.\n")
 
-    out = REPORTS / "G2a_global_macro.md"
+    out = REPORTS / f"G2a_{shock_type}_{meta['data_version']}.md"
+    if out.exists():
+        raise FileExistsError(
+            f"{out} đã tồn tại — không ghi đè report cũ (docs/10 F1). "
+            "Đổi data_version hoặc xóa file cũ một cách CÓ CHỦ ĐÍCH rồi chạy lại.")
     out.write_text("\n".join(parts), encoding="utf-8")
     return out
+
+
+# shock_method (transform) -> shock_type (ban chat cua bien). zscore/log1p van la
+# LEVEL — chi doi thang do. "innovation" chi co khi G2.0 (shocks.py) cung cap.
+SHOCK_METHOD_TO_TYPE = {"zscore": "level", "log1p": "level", "innovation": "innovation"}
 
 
 def main() -> None:
@@ -302,13 +324,21 @@ def main() -> None:
     ap.add_argument("--horizon", type=int, default=30, help="max horizon (ngày)")
     ap.add_argument("--macro-lags", type=int, default=5,
                     help="số lag ρ của chính M (VIX rất dai, cần ≥5)")
+    ap.add_argument("--shock-method", default="zscore",
+                    choices=list(SHOCK_METHOD_TO_TYPE),
+                    help="transform shock; 'innovation' cần G2.0 (shocks.py)")
     ap.add_argument("--refresh", action="store_true", help="keo lai FRED (bo cache)")
     args = ap.parse_args()
+
+    shock_type = SHOCK_METHOD_TO_TYPE[args.shock_method]
+    if args.shock_method == "innovation":
+        raise NotImplementedError(
+            "shock-method=innovation chờ G2.0 (econometrics/shocks.py) — docs/10 D2.")
 
     print("[1/4] Xây panel tầng 2 (GPR file + FRED macro)...")
     panel = build_tier2_panel(
         gpr_path=args.gpr_path, start=args.start, end=args.end,
-        refresh=args.refresh)
+        refresh=args.refresh, shock_method=args.shock_method)
     print(f"      panel: {panel.shape[0]} ngày, {panel.index.min().date()} "
           f"→ {panel.index.max().date()}, cột: {list(panel.columns)}")
 
@@ -317,20 +347,24 @@ def main() -> None:
     irf = estimate_tier2(
         panel, macro_vars=MACRO, horizons=horizons, macro_lags=args.macro_lags)
 
+    data_version = _data_version(args.gpr_path)
     DATADIR.mkdir(parents=True, exist_ok=True)
-    irf.to_csv(DATADIR / "tier2_irf.csv", index=False)
-    print(f"      IRF rows: {len(irf)} → {DATADIR / 'tier2_irf.csv'}")
+    irf_csv = DATADIR / f"tier2_irf_{shock_type}_{data_version}.csv"
+    irf.to_csv(irf_csv, index=False)
+    print(f"      IRF rows: {len(irf)} → {irf_csv}")
 
     print("[3/4] Vẽ IRF...")
     FIGS.mkdir(parents=True, exist_ok=True)
     for M in MACRO:
-        out = FIGS / f"irf_{M}_{DEFAULT_SHOCKS[0]}.png"
+        out = FIGS / f"irf_{M}_{DEFAULT_SHOCKS[0]}_{shock_type}.png"
         plot_irf(irf, M, DEFAULT_SHOCKS[0], out)
     print(f"      {len(MACRO)} đồ thị → {FIGS}")
 
     print("[4/4] Viết report...")
     meta = {
-        "data_version": _data_version(args.gpr_path),
+        "shock_type": shock_type,
+        "shock_method": args.shock_method,
+        "data_version": data_version,
         "git_commit": _git_commit(),
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "panel_start": panel.index.min().date().isoformat(),
@@ -341,7 +375,7 @@ def main() -> None:
     }
     report = write_report(irf, panel, meta)
     print(f"      → {report}")
-    print("\nDONE. Xem docs/reports/G2a_global_macro.md")
+    print(f"\nDONE. Xem {report}")
 
 
 if __name__ == "__main__":
