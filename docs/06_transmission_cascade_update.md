@@ -64,9 +64,10 @@ r^c_{t+h} = α^c
 - **shock^direct**: phần GPR đánh thẳng vào tâm lý nhà đầu tư nước đó không qua biến vĩ mô — với VN là tin Biển Đông, thuế VN, GPRC_VNM⊥ (đã orthogonalize khỏi global).
 - Phân rã đóng góp (variance decomposition): khi r_VN giảm, bao nhiêu % do oil / dxy / vix / direct.
 
-### Mediation — đo direct vs indirect (kiểm định nhân-quả)
+### Mediation — đo direct vs indirect ~~(kiểm định nhân-quả)~~
+> ⛔ **Công thức dưới là bản v1 ĐÃ BỎ** (nhân cùng horizon — xem đính chính đầu file, mục 2). Bản đúng: `07_formulas_reference_v2.md` §5.2 (tích chập). Giữ nguyên văn để đối chứng:
 ```
-Total effect (GPR → r_VN)  = Direct (λ)  +  Indirect (Σ γ_{M,j} · θ^c_M)
+Total effect (GPR → r_VN)  = Direct (λ)  +  Indirect (Σ γ_{M,j} · θ^c_M)    ← SAI, v1
 ```
 - Nếu Indirect >> Direct: VN chịu shock chủ yếu qua kênh vĩ mô toàn cầu (đúng kỳ vọng cho nền kinh tế nhỏ mở).
 - Nếu Direct đáng kể: có thành phần rủi ro riêng VN không qua global — biện minh cho việc xây corpus tiếng Việt (V-phase).

@@ -147,7 +147,7 @@ vn-gpr-research/
   └── reports/       # kết quả versioned, cả biến thể fail
 ```
 - Thư viện: statsmodels (LP, VAR), linearmodels (panel FE), arch (volatility); TVP-VAR connectedness có thể port từ package R `ConnectednessApproach` hoặc implement theo Antonakakis-Gabauer.
-- Quy tắc sắt: mọi kết quả báo cáo phải kèm `data_version + code_commit`; OOS window (2023–2026) khóa cứng trong config, CI reject mọi thay đổi file config đó sau khi đã chạy lần đầu.
+- Quy tắc sắt: mọi kết quả báo cáo phải kèm `data_version + code_commit`; data split khóa cứng trong `config/backtest.yaml` (từ 2026-07-16: 4 tầng dev/val/pseudo-OOS/**final holdout 2026-H1 chạm 1 lần** — review `08` §4.8, thay OOS 2023 đơn cũ), CI/test reject mọi thay đổi mốc split.
 
 ### [R2] backtest-engine — Backtest tín hiệu giao dịch
 
@@ -200,7 +200,7 @@ gpr-core-engine/                 # build 1 lần, country-agnostic
 |---|---|---|---|
 | **G1** | 1 | S2 ingestor: load GPRD daily + GPRC (US/CN/RU/VNM + toàn bộ 44 nước, lưu hết — thêm nước sau khỏi ingest lại), Oil/DXY/VIX, VN-Index/VN30/USD-VND vào PG. Khám phá dữ liệu đầu tiên: vẽ chuỗi, đánh dấu sự kiện mốc | Toàn bộ series trong PG, notebook khám phá review cùng nhau |
 | **G2** | 2–5 | R1 trên input global: (a) Local Projection r^VN_{t+h} lên GPRD/GPRC các nguồn, tách GPT/GPA; (b) TVP-VAR connectedness; (c) KĐ1 (explanatory), KĐ3 (threats vs acts), **KĐ5 (lead-lag GPRD→VN-Index — giá trị thương mại cao nhất, chạy được ngay không cần corpus VN)**. GPRC_VNM dùng làm proxy tạm cho thành phần VN | KĐ1 pass trên proxy → tiếp G3; fail → dừng, đánh giá lại trước khi tốn thêm công |
-| **G3** | 6–8 | R2 backtest 3 chiến lược global-only: risk-off theo GPRD percentile, sector rotation theo GPRC_USA/CHN, sizing theo GPT. Walk-forward, OOS 2023–2026 khóa cứng | IC > 0.03 & Sharpe beat benchmark → G4 |
+| **G3** | 6–8 | R2 backtest 3 chiến lược global-only: risk-off theo GPRD percentile, sector rotation theo GPRC_USA/CHN, sizing theo GPT. Walk-forward theo split 4 tầng `config/backtest.yaml` (sửa 2026-07-16) | Gate mới (review `08` §4.8): incremental IC > 0 vs baseline non-GPR, CI rõ, ổn định qua regime, dương sau phí → G4 |
 | **G4** | 9–10 | S6 API rút gọn + S7: Kafka topic, 2 tools cho agents, alert leading-signal (nếu KĐ5 pass) | Tín hiệu global chạy thật trong Quant Agent |
 
 ### Phase VIETNAM (V1–V3): corpus tiếng Việt — chỉ khởi động sau khi G-phase chứng minh giá trị
@@ -236,7 +236,7 @@ gpr-core-engine/                 # build 1 lần, country-agnostic
 3. **`model_version` + `rubric_version` trên mọi bản ghi score** — rubric tiếng Việt chắc chắn sẽ sửa vài lần sau V1; không có version thì mỗi lần sửa là mất toàn bộ lịch sử so sánh.
 4. **`published_at` chính xác đến phút ngay từ đầu** — Lớp 2b (actor weights bằng event study intraday) và KĐ5 (lead-lag) chết nếu chỉ có ngày.
 5. **Backfill bằng GPT-4o-mini, production cân nhắc Qwen local** — backfill là one-off ($30–60, không đáng tối ưu), production là chi phí chạy mãi (Qwen local ≈ 0 nếu V2 pass).
-6. **OOS window khóa cứng bằng CI** — kỷ luật chống data snooping phải enforce bằng máy, không bằng lời hứa.
+6. **Data split khóa cứng bằng CI/test** — kỷ luật chống data snooping phải enforce bằng máy, không bằng lời hứa. (Từ 2026-07-16: split 4 tầng + final holdout 2026-H1 trong `config/backtest.yaml`, enforce bởi `tests/test_config_locked.py`.)
 
 ## 4. RỦI RO THỰC THI (khác với rủi ro nghiên cứu ở research plan Phần E)
 

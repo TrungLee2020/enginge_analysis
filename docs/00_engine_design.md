@@ -40,7 +40,7 @@ Ba chân đo ba khái niệm khác nhau: **chú ý** (báo chí viết gì) — 
 | Oil (Brent), DXY, VIX, US10Y | FRED/yfinance | daily | — |
 | VN-Index, VN30, USD/VND, thanh khoản HOSE | nguồn BeaverX sẵn có | daily | — |
 
-Bảng: `ext_series (series_id, date, value, loaded_at)`. Cron tải file GPR monthly từ server BeaverX (domain không qua được sandbox). Ghi chú citation bắt buộc khi dùng: "Data downloaded from https://www.matteoiacoviello.com/gpr.htm on <ngày tải>".
+Bảng: `ext_series` — schema đầy đủ ở `sql/001_schema_core.sql` (từ 2026-07-16 có thêm `available_at/revised_at/source_version/data_version/quality_flag` chống leakage — review `08` §4.7, CLAUDE.md #11; dòng cũ `(series_id, date, value, loaded_at)` lỗi thời). Cron tải file GPR monthly từ server BeaverX (domain không qua được sandbox). Ghi chú citation bắt buộc khi dùng: "Data downloaded from https://www.matteoiacoviello.com/gpr.htm on <ngày tải>".
 
 **Chân A một mình đã đủ chạy toàn bộ econometrics + backtest đợt đầu** (KĐ1/3/5 + 3 chiến lược) — đây là con đường ra kết quả trong 6–8 tuần như roadmap v1.1. Chân B/C là nâng cấp có cổng kiểm soát.
 
@@ -155,7 +155,13 @@ Theo đúng protocol đã publish (arXiv 2507.04833 — dùng LLM biên soạn s
 
 ## 3.bis. TRANSMISSION CASCADE — 3 TẦNG (tách tổng khỏi riêng nước)
 
-> Chi tiết đầy đủ: `docs/06_transmission_cascade_update.md`. Công thức: `docs/07_formulas_reference.md` §3–5.
+> Chi tiết đầy đủ: `docs/06_transmission_cascade_update.md`. Công thức: `docs/07_formulas_reference_v2.md` §3–5.
+>
+> ### ⚠️ ĐÍNH CHÍNH (2026-07-16, sau review `08` / phản hồi `09`)
+> Kiến trúc 3 tầng của mục này vẫn ĐÚNG, nhưng 3 chi tiết công thức bên dưới đã bị thay — khi mâu thuẫn, **`07_formulas_reference_v2.md` (v2.1) là nguồn chân lý**:
+> 1. **Tầng 3 có BA hệ số, không phải hai**: `β` global-direct + `θ` indirect + `λ` domestic-direct. Sơ đồ dưới ghi `r^c = θ·macro + λ·GPR^{c,⊥}` là dạng v1 đã bỏ (thiếu β — review §4.2; bản gốc `01` Lớp 4b vốn có đủ β).
+> 2. **Mediation `Σ γ_{M,j}·θ^c_M` (nhân cùng horizon) SAI** → tích chập: `Indirect(h) = Σ_M Σ_{s=0..h} γ_{M,j}(s)·θ^c_M(h−s)` (review §4.1). Gọi là "transmission decomposition", KHÔNG "causal mediation" khi chưa có structural ID.
+> 3. **Mọi shock là INNOVATION, không phải level** `ln(1+GPR)` (review §4.4, CLAUDE.md #9).
 
 Ba chân (A/B/C) sinh **shock vector** ở TẦNG 1. Từ shock tới thị trường đích KHÔNG map thẳng
 một hệ số β — mà đi qua một tầng vĩ mô toàn cầu trung gian. Ba tầng nối tiếp (mediation):
@@ -167,8 +173,9 @@ TẦNG 1  SHOCK           GPR / S-GPR / GPT / GPA / Surprise / Ladder   (ba châ
 TẦNG 2  GLOBAL MACRO    Oil, DXY, VIX, US10Y   ← generic ENGINE, ước lượng 1 lần
    │                    = "Global Macro Impact" (deliverable độc lập, bán cho mọi nước)
    ▼
-TẦNG 3  MARKET ĐÍCH     r^c = θ^c·(macro, INDIRECT) + λ^c·(GPR^{c,⊥} DIRECT) + controls
-                        = PARAMS riêng từng nước (β_VN, β_TH...), hệ số tự do ước lượng từ dữ liệu
+TẦNG 3  MARKET ĐÍCH     r^c = β^c·(GPR^{j,innov} GLOBAL-DIRECT) + θ^c·(macro INDIRECT)
+                            + λ^c·(GPR^{c,⊥,innov} DOMESTIC-DIRECT) + controls
+                        = PARAMS riêng từng nước (β/θ/λ), hệ số tự do ước lượng từ dữ liệu
 ```
 
 **Tại sao tách:** shock Trung Đông (qua kênh dầu) và shock Mỹ-Trung (qua kênh tỷ giá/risk-off) đánh VN
@@ -176,8 +183,10 @@ theo cơ chế khác nhau; gộp vào một β là sai nhân-quả. Tách tầng
 nước, params tự do) cho: (1) hệ số đúng theo kênh; (2) hai deliverable — **Global Macro Impact** (1→2,
 generic) + **Country Transmission** (2→3, mỗi nước một `config/params/<country>.yaml`).
 
-**Mediation (kiểm định nhân-quả):** `Total = Direct(λ) + Indirect(Σ γ_{M,j}·θ^c_M)`. Indirect≫Direct →
-nước chịu shock chủ yếu qua kênh vĩ mô toàn cầu (điển hình nền KT nhỏ mở); Direct đáng kể → có rủi ro
+**Transmission decomposition (KĐ12 — reduced-form, KHÔNG gọi "causal" khi chưa có structural ID):**
+`Total^global_j(h) = β_j(h) + Indirect_j(h)` với `Indirect_j(h) = Σ_M Σ_{s=0..h} γ_{M,j}(s)·θ^c_M(h−s)`
+(tích chập — công thức `07v2` §5.2); phần riêng nước: `Total^domestic = λ(h)`. Indirect≫(β+λ) →
+nước chịu shock chủ yếu qua kênh vĩ mô toàn cầu (điển hình nền KT nhỏ mở); λ đáng kể → có rủi ro
 riêng không qua global, biện minh cho corpus bản địa (V-phase). Là **KĐ12** trong research plan.
 
 Nguyên tắc engine+params giữ nguyên: **tầng 1–2 = ENGINE** (country-agnostic), **tầng 3 = PARAMS**.

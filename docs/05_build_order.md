@@ -58,7 +58,7 @@ Ký hiệu: 🟢 = code production | 🔬 = code research (offline, không servi
 > **CẬP NHẬT (xem `docs/06_transmission_cascade_update.md`):** G2 cũ map thẳng `GPR → r_VN` (2 tầng)
 > đã được thay bằng cascade 3 tầng để tách phần **tổng (global, generic)** khỏi phần **riêng
 > từng quốc gia (params tự do)**. G2 nay chia làm **G2a (tầng 2 global macro)** + **G2b (tầng 3 country)**.
-> Công thức đầy đủ: `docs/07_formulas_reference.md` §3 (tầng 2), §4–5 (tầng 3, mediation).
+> Công thức đầy đủ: `docs/07_formulas_reference_v2.md` §3 (tầng 2), §4–5 (tầng 3, transmission decomposition).
 
 **Mục tiêu:** đo tác động GPR qua 2 chặng — (1) GPR → biến vĩ mô toàn cầu (generic, bán được cho mọi
 nước), (2) vĩ mô toàn cầu + shock riêng → VN-Index. Research code, chạy ra kết quả, chưa service hóa.

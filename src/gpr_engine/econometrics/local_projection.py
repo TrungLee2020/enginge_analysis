@@ -1,6 +1,6 @@
 """Local Projection (Jorda 2005) — utility DUNG CHUNG cho tang 2 va tang 3.
 
-Xem docs/07_formulas_reference.md §3 (tang 2) va §5.1 (tang 3), docs/06 §2.5.
+Xem docs/07_formulas_reference_v2.md §3 (tang 2) va §5.1 (tang 3), docs/06 §2.5.
 
 Vai tro: KHONG con la "model chinh" — la ham nen uoc luong impulse response cho
 mot phuong trinh LP bat ky. Tang 2 (tier2_global_macro) va tang 3 (tier3_country)

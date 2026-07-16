@@ -1,6 +1,9 @@
 # CÔNG THỨC MÔ HÌNH GPR ENGINE — THAM CHIẾU CHO REPORT
 
-**Phiên bản:** 1.0 — 07/2026
+> # ⛔ BẢN ARCHIVE — KHÔNG DÙNG
+> File này là **v1, đã bị thay** bởi `07_formulas_reference_v2.md` (sửa theo review `08`: innovation thay level, 3 hệ số β/θ/λ, convolution, Shapley). Giữ lại chỉ để đối chứng lịch sử. Mọi tham chiếu "docs/07" trong code/docs hiểu là **bản v2**.
+
+**Phiên bản:** 1.0 — 07/2026 (ARCHIVED 2026-07-16)
 **Mục đích:** Tập hợp đầy đủ công thức từng tầng để viết report. Ký hiệu thống nhất, kèm nguồn học thuật và ghi chú triển khai. Công thức cuối (§5) là dạng áp dụng cho một quốc gia bất kỳ.
 
 ---
