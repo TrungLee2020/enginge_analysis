@@ -1,24 +1,31 @@
 """tier3_country.py — TANG 3 cascade: COUNTRY TRANSMISSION (G2b). 🔬 research
 
-Xem docs/06 §2.4, docs/07 §4-5.
+Xem docs/06 (kien truc), docs/07_formulas_reference_v2.md §4-5 (cong thuc chuan).
+Sua 2026-07-16 theo review 08 / phan hoi 09 (docs/10 F2):
+  [4.2] BA he so — beta (global-direct) + theta (indirect) + lambda (domestic-direct).
+        Ban cu chi co theta+lambda (lam roi beta cua spec goc 01 Lop 4b).
+  [4.1] Indirect la TICH CHAP: Indirect(h) = Σ_M Σ_{s=0..h} γ_{M,j}(s)·θ_M(h−s).
+        KHONG nhan hai he so cung horizon.
+  [4.5] Dong gop kenh = Shapley/LMG cua R². Cong thuc θ²Var(M)/Var(r) da XOA
+        (bo covariance, tong co the >100% — CLAUDE.md #12).
 
-Phuong trinh (docs/07 §5.1, Local Projection horizon h):
-    r^c_{t+h} = α + [θ_oil·oil + θ_dxy·dxy + θ_vix·vix + θ_rate·us10y]   (INDIRECT, qua tang 2)
-               + λ · GPR^{c,⊥}_t                                        (DIRECT, danh thang)
-               + Φ·X^c + ε
+Phuong trinh tang 3 (docs/07v2 §5.1, Local Projection theo horizon h):
+    r^c_{t+h} = α + Σ_j β_j·GPR^{j,innov}    (GLOBAL-DIRECT, khong qua macro)
+              + Σ_M θ_M·M_t                  (INDIRECT, qua tang 2)
+              + λ·GPR^{c,⊥,innov}            (DOMESTIC-DIRECT)
+              + Φ·X^c + ε
+Moi shock la INNOVATION (CLAUDE.md #9). Ket qua goi la "transmission
+decomposition" (reduced-form/predictive), KHONG "causal mediation" khi chua co
+structural ID (claims matrix 07v2 §6.4).
 
-Ba thanh phan:
-  1. orthogonalize()      — tach GPR^{c,⊥} (phan rieng nuoc c) khoi global (§4.1, FWL).
-  2. estimate_tier3()     — uoc luong θ_* va λ theo horizon.
-  3. mediation_analysis() — Total = Direct(λ·∂orth/∂shock) + Indirect(Σ γ_{M,j}·θ_M).
-
-Params doc tu config/params/<country>.yaml. Khong dien θ tay.
+Params doc tu config/params/<country>.yaml. Khong dien he so tay.
 """
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from itertools import combinations
+from math import factorial
 
-import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
@@ -28,8 +35,9 @@ from .local_projection import run_local_projection
 def orthogonalize(df: pd.DataFrame, target: str, on: Iterable[str]) -> pd.Series:
     """Tach phan rieng nuoc c: hoi quy target len cac regressor global, tra ve phan du.
 
-    GPR^c = f(GPR_global, GPR_US, GPR_CN, Oil) + GPR^{c,⊥}   (docs/07 §4.1, FWL).
-    Phan du GPR^{c,⊥} chinh la DIRECT shock cho tang 3.
+    GPR^c = f(GPR_global, GPR_US, GPR_CN, Oil) + GPR^{c,⊥}   (docs/07v2 §4.1, FWL).
+    Phan du GPR^{c,⊥} la DOMESTIC-DIRECT shock (λ) cua tang 3 — LUU Y: no la phan
+    RIENG cua nuoc c, KHONG phai tac dong truc tiep cua global shock (do la β).
     """
     on = list(on)
     missing = [c for c in [target, *on] if c not in df.columns]
@@ -46,109 +54,216 @@ def estimate_tier3(
     df: pd.DataFrame,
     market_ret: str,
     macro_channels: Iterable[str],
-    direct_shock: str,
+    direct_shock: str | None = None,
+    global_shocks: Iterable[str] = (),
     controls: Iterable[str] = (),
     horizons: Iterable[int] = range(0, 61),
 ) -> pd.DataFrame:
-    """Uoc luong tang 3: θ_* (INDIRECT, moi kenh macro) + λ (DIRECT) theo horizon.
+    """Uoc luong tang 3: beta (global-direct) + theta (indirect) + lambda (domestic).
 
-    Dung run_local_projection nhung o day "shock" chinh la direct_shock, con cac
-    kenh macro dua vao controls — moi he so lay ra tu cung mo hinh LP (HAC SE).
+    Moi he so lay tu CUNG mot model LP (HAC SE) qua run_local_projection(return_all=True).
+
+    Parameters
+    ----------
+    direct_shock : GPR^{c,⊥} innovation. None cho phep — track daily cua nuoc chi co
+        country-GPR monthly thi KHONG co direct shock daily (CLAUDE.md #10).
+    global_shocks : cac GPR^{j,innov} (beta). Rong duoc (chi do theta/lambda).
 
     Returns
     -------
-    DataFrame index-free, cot: horizon, lambda, se_lambda, p_lambda,
-    theta_<ch> (moi kenh), nobs.
+    DataFrame long: [horizon, term, role, coef, se, tstat, pvalue, ci_low, ci_high, nobs]
+    role ∈ {beta, theta, lambda, control}.
     """
     macro_channels = list(macro_channels)
+    global_shocks = list(global_shocks)
     controls = list(controls)
     horizons = list(horizons)
 
-    need = [market_ret, direct_shock, *macro_channels, *controls]
+    if not global_shocks and direct_shock is None:
+        raise ValueError("Can it nhat mot shock: global_shocks hoac direct_shock.")
+
+    role_of: dict[str, str] = {}
+    for g in global_shocks:
+        role_of[g] = "beta"
+    for m in macro_channels:
+        role_of[m] = "theta"
+    if direct_shock is not None:
+        role_of[direct_shock] = "lambda"
+    for c in controls:
+        role_of[c] = "control"
+
+    x_cols = list(role_of)                    # thu tu: beta, theta, lambda, control
+    need = [market_ret, *x_cols]
     missing = [c for c in need if c not in df.columns]
     if missing:
         raise KeyError(f"Cot khong co trong df: {missing}. Co: {list(df.columns)}")
 
-    base = df.reset_index(drop=True)
-    x_cols = [direct_shock, *macro_channels, *controls]
-    hac = max(horizons) if horizons else 0
+    # run_local_projection nhan (shock, controls) — voi return_all=True moi regressor
+    # deu duoc tra he so nen phan chia shock/controls chi la hinh thuc goi ham.
+    out = run_local_projection(
+        df, y=market_ret, shock=x_cols[0], controls=x_cols[1:],
+        horizons=horizons, return_all=True,
+    )
+    out = out.rename(columns={"beta": "coef"})
+    out.insert(2, "role", out["term"].map(role_of))
+    return out[["horizon", "term", "role", "coef", "se", "tstat", "pvalue",
+                "ci_low", "ci_high", "nobs"]]
 
-    rows = []
+
+# ---------------------------------------------------------------------------
+# Transmission decomposition — TICH CHAP (review 4.1, docs/07v2 §5.2)
+# ---------------------------------------------------------------------------
+def convolve_indirect(
+    gamma_j: Mapping[str, pd.Series],
+    theta: Mapping[str, pd.Series],
+    horizons: Iterable[int] | None = None,
+) -> pd.DataFrame:
+    """Indirect_{j→c}(h) = Σ_M Σ_{s=0..h} γ_{M,j}(s) · θ^c_M(h−s).
+
+    Dien giai: shock day mediator M o buoc s, mediator danh thi truong o buoc h−s.
+    Day la chuoi dong thuc — KHONG phai tich hai he so cung horizon (bug v1).
+
+    gamma_j : {channel: IRF tang 2 γ_{M,j}(s), Series index=horizon}.
+    theta   : {channel: θ^c_M(h) tang 3, Series index=horizon}.
+    horizons: cac h can tinh; mac dinh = giao cua range hai input.
+    IRF thieu buoc nao coi nhu 0 o buoc do (fill 0 — ghi ro trong report).
+
+    Returns: DataFrame index=horizon, mot cot moi channel + 'indirect_total'.
+    """
+    channels = [ch for ch in gamma_j if ch in theta]
+    if not channels:
+        raise ValueError(
+            f"Khong co channel chung: gamma={list(gamma_j)}, theta={list(theta)}")
+    if horizons is None:
+        h_max = min(max(int(gamma_j[ch].index.max()) for ch in channels),
+                    max(int(theta[ch].index.max()) for ch in channels))
+        horizons = range(0, h_max + 1)
+    horizons = list(horizons)
+
+    rows = {}
     for h in horizons:
-        y_h = base[market_ret].shift(-h)
-        data = pd.concat([y_h.rename("__y__"), base[x_cols]], axis=1).dropna()
-        if len(data) <= len(x_cols) + 1:
-            continue
-        Xc = sm.add_constant(data[x_cols], has_constant="add")
-        res = sm.OLS(data["__y__"], Xc).fit(
-            cov_type="HAC", cov_kwds={"maxlags": max(hac, h)})
-        row = {
-            "horizon": h,
-            "lambda": res.params[direct_shock],
-            "se_lambda": res.bse[direct_shock],
-            "p_lambda": res.pvalues[direct_shock],
-            "nobs": int(res.nobs),
-        }
-        for ch in macro_channels:
-            row[f"theta_{ch}"] = res.params[ch]
-            row[f"p_theta_{ch}"] = res.pvalues[ch]
-        rows.append(row)
+        contrib = {}
+        for ch in channels:
+            g = gamma_j[ch]
+            t = theta[ch]
+            total = 0.0
+            for s in range(0, h + 1):
+                total += float(g.get(s, 0.0)) * float(t.get(h - s, 0.0))
+            contrib[ch] = total
+        contrib["indirect_total"] = sum(contrib.values())
+        rows[h] = contrib
 
-    return pd.DataFrame(rows)
+    out = pd.DataFrame.from_dict(rows, orient="index")
+    out.index.name = "horizon"
+    return out[[*channels, "indirect_total"]]
 
 
-def mediation_analysis(
+def transmission_decomposition(
     gamma: pd.DataFrame,
-    theta: Mapping[str, float],
-    lam: float,
-    d_orth_d_shock: float,
+    tier3_coefs: pd.DataFrame,
     shock: str,
-    horizon: int = 0,
-) -> dict:
-    """Phan ra tong tac dong cua mot shock nguon len r^c (docs/07 §5.2):
+    horizons: Iterable[int] | None = None,
+) -> pd.DataFrame:
+    """Phan ra tong tac dong cua global shock j len r^c (docs/07v2 §5.2):
 
-        Total = Direct + Indirect
-        Direct   = λ · ∂GPR^{c,⊥}/∂shock
-        Indirect = Σ_M θ_M · γ_{M,shock}   (γ tu tang 2)
+        Total^global_j(h)  = beta_j(h) + Indirect_j(h)      (Indirect = tich chap)
+        Total^domestic(h)  = lambda(h)
 
-    gamma : DataFrame tang 2 (cot macro_var, shock, horizon, beta=γ).
-    theta : {macro_channel: θ_M} tu estimate_tier3.
-    lam   : λ (DIRECT coef) tu estimate_tier3.
-    d_orth_d_shock : ∂GPR^{c,⊥}/∂shock (do tu buoc orthogonalize; ~0 neu phan rieng doc lap shock).
+    gamma       : output tang 2 (estimate_tier2) — cot [macro_var, shock, horizon, beta].
+    tier3_coefs : output estimate_tier3 — cot [horizon, term, role, coef, ...].
+    shock       : ten global shock j (phai co trong gamma["shock"]; neu vang trong
+                  tier3 role=beta thi beta(h)=0 — shock khong vao truc tiep).
+
+    CLAIM (07v2 §6.4): day la "transmission decomposition" reduced-form —
+    KHONG dien giai causal khi chua co structural identification.
     """
-    g = gamma[(gamma["shock"] == shock) & (gamma["horizon"] == horizon)]
-    g = g.set_index("macro_var")["beta"]
+    g_sub = gamma[gamma["shock"] == shock]
+    if g_sub.empty:
+        raise ValueError(f"gamma khong co shock {shock!r}: {gamma['shock'].unique()}")
+    gamma_j = {ch: grp.set_index("horizon")["beta"].sort_index()
+               for ch, grp in g_sub.groupby("macro_var")}
 
-    indirect = 0.0
-    contrib = {}
-    for ch, th in theta.items():
-        gm = float(g.get(ch, 0.0))
-        c = th * gm
-        contrib[ch] = c
-        indirect += c
+    theta_df = tier3_coefs[tier3_coefs["role"] == "theta"]
+    theta = {ch: grp.set_index("horizon")["coef"].sort_index()
+             for ch, grp in theta_df.groupby("term")}
 
-    direct = lam * d_orth_d_shock
-    return {
-        "shock": shock,
-        "horizon": horizon,
-        "direct": direct,
-        "indirect": indirect,
-        "total": direct + indirect,
-        "indirect_by_channel": contrib,
-    }
+    beta_s = (tier3_coefs[(tier3_coefs["role"] == "beta")
+                          & (tier3_coefs["term"] == shock)]
+              .set_index("horizon")["coef"].sort_index())
+    lam_s = (tier3_coefs[tier3_coefs["role"] == "lambda"]
+             .set_index("horizon")["coef"].sort_index())
+
+    ind = convolve_indirect(gamma_j, theta, horizons=horizons)
+    out = ind.rename(columns={c: f"indirect_{c}" for c in ind.columns
+                              if c != "indirect_total"})
+    out = out.rename(columns={"indirect_total": "indirect"})
+    out["beta_global_direct"] = [float(beta_s.get(h, 0.0)) for h in out.index]
+    out["total_global"] = out["beta_global_direct"] + out["indirect"]
+    out["domestic"] = [float(lam_s.get(h, float("nan"))) for h in out.index]
+    return out
 
 
-def variance_decomposition(
+# ---------------------------------------------------------------------------
+# Dong gop kenh — Shapley/LMG cua R² (review 4.5, docs/07v2 §5.3)
+# ---------------------------------------------------------------------------
+def shapley_r2(
     df: pd.DataFrame,
-    market_ret: str,
-    theta: Mapping[str, float],
-    lam: float,
-    direct_shock: str,
+    y: str,
+    channels: Iterable[str],
+    controls: Iterable[str] = (),
 ) -> dict:
-    """Ty le dong gop tung kenh vao Var(r^c) (docs/07 §5.3):
-        Share_M = θ_M^2 · Var(M) / Var(r^c),  Share_direct = λ^2 · Var(orth) / Var(r^c).
+    """Shapley/LMG decomposition cua R²: chia deu dong gop cua moi channel qua
+    moi thu tu dua bien vao — xu ly duoc covariance giua cac kenh (thu khien
+    cong thuc θ²Var(M)/Var(r) cu sai, tong co the >100%).
+
+        Share_k = Σ_{S ⊆ K\\{k}} |S|!(|K|−|S|−1)!/|K|! · [R²(S∪{k}) − R²(S)]
+
+    controls (neu co) LUON nam trong model — shares phan ra phan R² TREN baseline
+    controls-only: Σ shares = R²(full) − R²(controls). Khong controls: Σ = R²(full).
+
+    Do phuc tap 2^K — K kenh macro ≤ 6 la tuc thoi. K > 15 -> raise (dung sampling).
+
+    Returns: {"shares": {channel: share}, "r2_full": float, "r2_baseline": float}
     """
-    var_r = df[market_ret].var()
-    shares = {ch: (th ** 2) * df[ch].var() / var_r for ch, th in theta.items()}
-    shares["direct"] = (lam ** 2) * df[direct_shock].var() / var_r
-    return shares
+    channels = list(channels)
+    controls = list(controls)
+    if not channels:
+        raise ValueError("channels rong.")
+    if len(channels) > 15:
+        raise ValueError(f"K={len(channels)} qua lon cho Shapley exact (2^K subset).")
+    missing = [c for c in [y, *channels, *controls] if c not in df.columns]
+    if missing:
+        raise KeyError(f"Cot khong co: {missing}")
+
+    data = df[[y, *channels, *controls]].dropna()
+
+    def r2(subset: tuple[str, ...]) -> float:
+        cols = [*controls, *subset]
+        if not cols:
+            return 0.0
+        X = sm.add_constant(data[list(cols)], has_constant="add")
+        return float(sm.OLS(data[y], X).fit().rsquared)
+
+    cache = {(): r2(())}
+    K = len(channels)
+    for r in range(1, K + 1):
+        for S in combinations(channels, r):
+            cache[tuple(sorted(S))] = r2(S)
+
+    shares = {}
+    for k in channels:
+        others = [c for c in channels if c != k]
+        total = 0.0
+        for r in range(0, len(others) + 1):
+            w = factorial(r) * factorial(K - r - 1) / factorial(K)
+            for S in combinations(others, r):
+                key = tuple(sorted(S))
+                key_k = tuple(sorted([*S, k]))
+                total += w * (cache[key_k] - cache[key])
+        shares[k] = total
+
+    return {
+        "shares": shares,
+        "r2_full": cache[tuple(sorted(channels))],
+        "r2_baseline": cache[()],
+    }

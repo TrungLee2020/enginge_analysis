@@ -27,6 +27,7 @@ def run_local_projection(
     horizons: Iterable[int] = range(0, 61),
     hac_maxlags: int | None = None,
     ci: float = 0.90,
+    return_all: bool = False,
 ) -> pd.DataFrame:
     """Uoc luong LP: hoi quy y_{t+h} len shock_t (+ controls_t) cho tung h.
 
@@ -35,15 +36,20 @@ def run_local_projection(
     df : DataFrame da align theo thoi gian (mot hang = mot ky). Dung thu tu hang
         lam truc thoi gian; khong yeu cau index dac biet.
     y : ten cot bien phu thuoc (return / bien vi mo tang 2).
-    shock : ten cot bien shock (GPR da log(1+x), S-GPR...).
+    shock : ten cot bien shock (INNOVATION/surprise — CLAUDE.md #9, khong phai level).
     controls : danh sach cot kiem soat X (VIX, DXY, lag return...).
     horizons : cac h can uoc luong (0 = dong thoi).
     hac_maxlags : lag cho Newey-West. Mac dinh = max(horizons) (chong lan chuan).
     ci : muc tin cay cho dai IRF (0.90 -> z ~ 1.645).
+    return_all : False (mac dinh) -> chi he so cua `shock`, wide theo horizon
+        (giu tuong thich tang 2). True -> he so cua MOI regressor, long format
+        [horizon, term, beta, se, tstat, pvalue, ci_low, ci_high, nobs] — dung
+        cho tang 3 (can ca beta/theta/lambda tu cung mot model).
 
     Returns
     -------
-    DataFrame index = horizon, cot: beta, se, tstat, pvalue, ci_low, ci_high, nobs.
+    return_all=False: DataFrame index=horizon, cot beta/se/tstat/pvalue/ci_low/ci_high/nobs.
+    return_all=True : DataFrame long nhu tren.
     """
     from scipy.stats import norm
 
@@ -60,6 +66,7 @@ def run_local_projection(
     z = norm.ppf(0.5 + ci / 2.0)
 
     rows = {}
+    long_rows: list[dict] = []
     base = df.reset_index(drop=True)
     x_cols = [shock, *controls]
 
@@ -88,6 +95,19 @@ def run_local_projection(
             ci_high=beta + z * se,
             nobs=int(res.nobs),
         )
+        if return_all:
+            for term in x_cols:
+                b, s = res.params[term], res.bse[term]
+                long_rows.append(dict(
+                    horizon=h, term=term, beta=b, se=s,
+                    tstat=res.tvalues[term], pvalue=res.pvalues[term],
+                    ci_low=b - z * s, ci_high=b + z * s, nobs=int(res.nobs),
+                ))
+
+    if return_all:
+        return pd.DataFrame(long_rows, columns=[
+            "horizon", "term", "beta", "se", "tstat", "pvalue",
+            "ci_low", "ci_high", "nobs"])
 
     out = pd.DataFrame.from_dict(rows, orient="index")
     out.index.name = "horizon"
