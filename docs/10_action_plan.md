@@ -61,6 +61,8 @@ Tests: 22/22 pass sau các thay đổi trên.
 
 ## 2. PHASE F — FIX (làm trước, 1 đợt)
 
+> **✅ HOÀN TẤT 2026-07-16.** Commits: baseline `cf74b3c` → F0 `3eeaf3f` → F1 `74086c5` → F2 `cc1a3bf` → F3 `7638a4f` → F4 `dca92ff`. Cổng Phase F pass: 32 test (28 econ + 4 config-lock) xanh; run_tier2 smoke-test end-to-end, report tự đánh dấu INELIGIBLE khi shock=level, không ghi đè; grep công thức cũ sạch. Kèm thêm ngoài kế hoạch: archive `07_formulas_reference.md` → `_v1_archived.md` (doc 09 §5 tuyên bố nhưng chưa làm).
+>
 > Kỷ luật: công thức sửa nào cũng **viết test trước** (CLAUDE.md). Mỗi fix một commit.
 
 ### F0 — Đóng nợ sync docs 00/01/02 (M5)
