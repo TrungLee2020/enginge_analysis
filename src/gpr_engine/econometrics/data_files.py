@@ -56,8 +56,11 @@ def transform_gpr_shocks(gpr_wide: pd.DataFrame, method: str = "zscore") -> pd.D
     """Bien doi shock GPR daily cho hoi quy tang 2. Giu ten cot goc.
 
     method:
-      - "zscore" (mac dinh): chuan hoa (x-mean)/std. Dung cho GPR DAILY TOAN CAU
-        (GPRD ~ 10..370, da o thang hop ly). γ doc la "phan ung / 1 do lech chuan shock".
+      - "innovation" (G2.0, docs/07v2 §2.0): shock = LEVEL − Ê_{t-1}[LEVEL], AR(p)
+        rolling one-step (p chon bang AIC tren dev window). Day la SHOCK HOP LE cho
+        hoi quy tang 2 (CLAUDE.md #9). Cot giu ten goc (GPRD -> GPRD la innovation).
+      - "zscore" (LEVEL, doi chung): chuan hoa (x-mean)/std. GPRD ~ 10..370, γ doc la
+        "phan ung / 1 do lech chuan". La LEVEL -> run_tier2 tu danh dau INELIGIBLE (#9).
       - "log1p": log(1+GPR). Quy uoc docs/07 §0 danh RIENG cho country-GPR nuoc nho
         (mean/std ≈ 0.05, lech phai manh). Ap len GPRD toan cau se ep 370→5.9, lam
         phang spike khung hoang -> KHONG dung cho daily global. Giu tuy chon de tuong thich.
@@ -65,11 +68,16 @@ def transform_gpr_shocks(gpr_wide: pd.DataFrame, method: str = "zscore") -> pd.D
     Tai sao khong log1p GPRD: docs/07 §0 bien minh log1p bang phan phoi country-GPR
     nuoc nho; GPRD daily khong thuoc phan phoi do. Standardize giu duoc bien do spike.
     """
+    if method == "innovation":
+        # innovation() log1p GPR thanh LEVEL roi tru persistent; ap tung cot, order/AIC.
+        from .shocks import innovation
+        return gpr_wide.apply(lambda col: innovation(col))
     if method == "log1p":
         return gpr_wide.apply(log1p_gpr)
     if method == "zscore":
         return (gpr_wide - gpr_wide.mean()) / gpr_wide.std()
-    raise ValueError(f"method khong ho tro: {method!r} (dung 'zscore' | 'log1p')")
+    raise ValueError(
+        f"method khong ho tro: {method!r} (dung 'innovation' | 'zscore' | 'log1p')")
 
 
 # ---------------------------------------------------------------------------

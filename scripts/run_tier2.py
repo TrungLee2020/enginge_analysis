@@ -55,6 +55,12 @@ REPORTS = Path("docs/reports")
 FIGS = REPORTS / "figs"
 DATADIR = REPORTS / "data"
 
+
+def _log1p(s):
+    """log1p GPR de select_ar_order doc dung LEVEL (dataset.log1p_gpr)."""
+    from gpr_engine.econometrics.dataset import log1p_gpr
+    return log1p_gpr(s)
+
 # Macro dua vao G2a: du 4 kenh (dxy da noi dai major<->broad, phu 1990+).
 MACRO = list(CORE_MACRO)
 
@@ -209,6 +215,10 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     parts.append("## Metadata\n")
     parts.append(f"- **shock_type**: `{shock_type}` (transform: `{meta['shock_method']}`)")
     parts.append(f"- **data_version** (sha256 GPR daily): `{meta['data_version']}`")
+    if meta.get("ar_orders"):
+        orders_str = ", ".join(f"{k}={v}" for k, v in sorted(meta["ar_orders"].items()))
+        parts.append(f"- **AR order (PERSISTENT, BIC/dev-window, pre-registered)**: "
+                     f"{orders_str} — spec khóa ở `config/hypothesis_registry.yaml`")
     parts.append(f"- **git commit**: `{meta['git_commit']}`")
     parts.append(f"- **generated_at**: {meta['generated_at']}")
     parts.append(f"- **panel range**: {meta['panel_start']} → {meta['panel_end']} "
@@ -302,7 +312,7 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     parts.append("- Diễn giải kết quả (leading/coincident, cơ chế kinh tế của dấu) "
                  "thuộc mục Human review phía trên — KHÔNG hard-code vào script.\n")
 
-    out = REPORTS / f"G2a_{shock_type}_{meta['data_version']}.md"
+    out = REPORTS / f"G2a_{shock_type}_{meta.get('version_tag', meta['data_version'])}.md"
     if out.exists():
         raise FileExistsError(
             f"{out} đã tồn tại — không ghi đè report cũ (docs/10 F1). "
@@ -331,9 +341,8 @@ def main() -> None:
     args = ap.parse_args()
 
     shock_type = SHOCK_METHOD_TO_TYPE[args.shock_method]
-    if args.shock_method == "innovation":
-        raise NotImplementedError(
-            "shock-method=innovation chờ G2.0 (econometrics/shocks.py) — docs/10 D2.")
+    # innovation (G2.0) nay da san sang: transform_gpr_shocks(method="innovation")
+    # dung econometrics.shocks.innovation (AR-p rolling, no leakage). docs/10 D2/D3.
 
     print("[1/4] Xây panel tầng 2 (GPR file + FRED macro)...")
     panel = build_tier2_panel(
@@ -348,15 +357,29 @@ def main() -> None:
         panel, macro_vars=MACRO, horizons=horizons, macro_lags=args.macro_lags)
 
     data_version = _data_version(args.gpr_path)
+    # Innovation: spec order (AR) là bậc tự do -> phải vào version, nếu không report
+    # order=5 và order=8 cùng data_version (chỉ hash file GPR) = versioning sai.
+    ar_orders = None
+    if args.shock_method == "innovation":
+        from gpr_engine.econometrics.data_files import load_gpr_daily
+        from gpr_engine.econometrics.shocks import DEFAULT_MAX_ORDER, select_ar_order
+        _gpr = load_gpr_daily(args.gpr_path)
+        ar_orders = {c: select_ar_order(_log1p(_gpr[c]), max_order=DEFAULT_MAX_ORDER)
+                     for c in DEFAULT_SHOCKS if c in _gpr.columns}
+        order_tag = "ar" + "-".join(str(ar_orders[c]) for c in sorted(ar_orders))
+        version_tag = f"{data_version}_{order_tag}"
+    else:
+        version_tag = data_version
+
     DATADIR.mkdir(parents=True, exist_ok=True)
-    irf_csv = DATADIR / f"tier2_irf_{shock_type}_{data_version}.csv"
+    irf_csv = DATADIR / f"tier2_irf_{shock_type}_{version_tag}.csv"
     irf.to_csv(irf_csv, index=False)
     print(f"      IRF rows: {len(irf)} → {irf_csv}")
 
     print("[3/4] Vẽ IRF...")
     FIGS.mkdir(parents=True, exist_ok=True)
     for M in MACRO:
-        out = FIGS / f"irf_{M}_{DEFAULT_SHOCKS[0]}_{shock_type}.png"
+        out = FIGS / f"irf_{M}_{DEFAULT_SHOCKS[0]}_{shock_type}_{version_tag}.png"
         plot_irf(irf, M, DEFAULT_SHOCKS[0], out)
     print(f"      {len(MACRO)} đồ thị → {FIGS}")
 
@@ -365,6 +388,8 @@ def main() -> None:
         "shock_type": shock_type,
         "shock_method": args.shock_method,
         "data_version": data_version,
+        "version_tag": version_tag,
+        "ar_orders": ar_orders,
         "git_commit": _git_commit(),
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "panel_start": panel.index.min().date().isoformat(),

@@ -1,0 +1,124 @@
+# hypothesis_registry.yaml — SỔ ĐĂNG KÝ GIẢ THUYẾT (pre-registration)
+#
+# Mục đích (docs/10 D1/G0, docs/09 §2.8): chống data-snooping bằng cách ĐĂNG KÝ
+# mỗi giả thuyết — phát biểu, dữ liệu, test, ngày — TRƯỚC khi nhìn kết quả. Sau khi
+# nhìn kết quả rồi mới đổi giả thuyết/spec = HARKing (hypothesizing after results
+# known). Registry này khóa bằng máy (tests/test_registry_locked.py): mọi thay đổi
+# vào giả thuyết ĐÃ đăng ký phải qua commit có chủ đích + giải thích.
+#
+# QUY TẮC:
+#   - status: registered  -> đã đăng ký, CHƯA chạy. Được sửa tự do (chưa tiêu bậc tự do).
+#   - status: tested       -> đã chạy + có report. KHÓA: không sửa statement/spec/data.
+#     Đổi ý sau khi tested = giả thuyết MỚI (id mới), không phải sửa cái cũ.
+#   - Mỗi lần chạy 1 test = 1 lần thử -> đếm vào n_trials (multiple-testing, Deflated Sharpe).
+#
+# Claims matrix (mức claim tối đa cho mỗi thành phần): docs/07_formulas_reference_v2.md §6.4.
+# KHÔNG lặp lại ở đây — trỏ về.
+
+registry_version: "1.0"
+created: "2026-07-18"
+
+# ---------------------------------------------------------------------------
+# SPEC KHÓA TRƯỚC (pre-registered) — chọn TRƯỚC khi đọc kết quả G2a
+# ---------------------------------------------------------------------------
+# AR order cho PERSISTENT (shocks.py) chọn bằng BIC trong TRẦN PARSIMONY p=5, trên
+# DEVELOPMENT WINDOW ONLY (2015-01-01..2020-12-31), rồi KHÓA. Đây là bậc tự do
+# docs/10 §5 cảnh báo: thử nhiều order rồi chọn cái cho kết quả G2a đẹp = snooping.
+# Khóa ở đây để select_ar_order tái lập và audit được.
+#
+# QUYẾT ĐỊNH 2026-07-18 (sau robustness, docs/g0 §1.1): dùng TRẦN p=5 + BIC thay vì
+# AIC-trần-mở. Lý do: AIC/BIC KHÔNG có cực tiểu nội với GPR daily (tự tương quan
+# regime dài đẩy argmin AIC->20+, BIC->14-16 — tiêu chí tự do đuổi biên, spec bất
+# ổn). NHƯNG innovation đo được đã ổn định từ p~6 (corr(innov_p8,innov_p10)=0.99,
+# autocorr innovation ~0.03-0.04 ở mọi order 4..16). Trần p=5 (1 tuần giao dịch) có
+# diễn giải kinh tế, đủ khử autocorr (rho1~0.04 từ p=4), parsimony. Lag regime bậc
+# cao còn lại LP tầng 2 kiểm soát bằng macro-lags.
+ar_persistent_spec:
+  method: AR                       # AR(p) rolling one-step (không EWMA — quyết định 2026-07-18)
+  order_selection: bic_dev_window_capped
+  criterion: bic
+  dev_window: ["2015-01-01", "2020-12-31"]
+  max_order_searched: 5            # TRẦN parsimony chủ động (không phải giới hạn kỹ thuật)
+  # Order chọn được (deterministic, tái lập bằng select_ar_order):
+  orders:
+    GPRD: 5
+    GPRD_ACT: 5
+    GPRD_THREAT: 2
+  # boundary_flag=true: GPRD/GPRD_ACT ở TRẦN p=5. Khác với bản 8 trước đây — giờ
+  # trần là lựa chọn kinh tế CÓ CHỦ ĐÍCH (parsimony 1 tuần), đã kiểm robustness:
+  # innovation bất biến ở vùng order thấp. KHÔNG cần nới thêm; ghi flag để minh
+  # bạch rằng order = trần, không phải cực tiểu nội.
+  boundary_flag: true
+  robustness_checked: true
+
+# ---------------------------------------------------------------------------
+# GIẢ THUYẾT ĐĂNG KÝ
+# ---------------------------------------------------------------------------
+hypotheses:
+  - id: KĐ1
+    statement: >
+      ΔVN-Index excess return phản ứng có ý nghĩa thống kê với GPR innovation
+      (global-direct và/hoặc qua kênh macro). H0: mọi hệ số phản ứng = 0.
+    source: "docs/01 §C2 Kiểm định 1; docs/07v2 §5.1"
+    data: "VN-Index daily return + GPRD_INNOV + macro (oil/dxy/vix/us10y). Track daily (KHÔNG GPRC_VNM — #10)."
+    shock: GPRD_INNOV                # innovation, không level (#9)
+    method: "Local Projection (Jordà), HAC/Newey-West; bootstrap SE"
+    outcome: "VN-Index excess return, horizons 0..H"
+    decides_gate: G2b
+    registered: "2026-07-18"
+    status: registered
+
+  - id: KĐ3
+    statement: >
+      Hệ số của threats (GPT_INNOV) khác hệ số của acts-bất-ngờ (GPA_SURPRISE_V1)
+      có ý nghĩa; act đã dự đoán được (đã price-in) tác động yếu hơn act bất ngờ.
+      H0: β_GPT = β_GPA_surprise.
+    source: "docs/01 §C2 Kiểm định 3"
+    data: "GPT_INNOV vs GPA_SURPRISE_V1 (surrogate — spec đầy đủ cần S-GPR+Ladder, G5/G6)"
+    shock: [GPT_INNOV, GPA_SURPRISE_V1]
+    method: "LP; Wald test chênh lệch hệ số"
+    outcome: "VN-Index / market return"
+    decides_gate: G2b
+    registered: "2026-07-18"
+    status: registered
+    note: "GPA_SURPRISE_V1 là surrogate; kết quả KHÔNG so trực tiếp với spec đầy đủ sau này (khác version)."
+
+  - id: KĐ5
+    statement: >
+      Global GPR daily (GPRD_INNOV) DẪN TRƯỚC phản ứng của VN với độ trễ Δ>0 ổn
+      định (vài giờ–2 ngày), VÀ trong khoảng trễ đó VN-Index chưa phản ứng hết →
+      leading indicator khả dụng. H0: Δ=0 (chỉ đồng thời, không dẫn trước).
+    source: "docs/01 §C2 Kiểm định 5 — 'giá trị thương mại cao nhất'"
+    data: "GPRD_INNOV daily (available_at +1d) vs VN-Index; lead-lag"
+    shock: GPRD_INNOV
+    method: "Lead-lag / Granger; LP theo horizon; point-in-time available_at"
+    outcome: "VN-Index return, độ trễ Δ"
+    decides_gate: G2b
+    registered: "2026-07-18"
+    status: registered
+    note: "Điểm nhạy look-ahead nhất — GPRD publish trễ ~1 ngày (#11). Dùng available_at, KHÔNG date."
+
+  - id: KĐ12
+    statement: >
+      Tổng tác động GPR→VN-Index phân rã thành BA phần: Global-direct (β),
+      Indirect (tích chập Σ_M Σ_s γ(s)·θ(h−s)), Domestic-direct (λ). Kỳ vọng
+      Indirect ≫ (β+λ) — nền KT nhỏ mở chịu shock chủ yếu qua kênh vĩ mô toàn cầu.
+      Nếu λ đáng kể → rủi ro riêng VN, biện minh V-phase corpus tiếng Việt.
+    source: "docs/01 §C2 Kiểm định 12; docs/07v2 §5.1-5.3"
+    data: "GPRD_INNOV + macro (tầng 2 γ) + GPRC_VNM⊥_INNOV (λ, monthly track only)"
+    shock: [GPRD_INNOV, "GPRC_VNM_ORTH_INNOV"]
+    method: "LP tầng 2 (γ) + tầng 3 (β,θ,λ); Indirect = convolution (KHÔNG nhân cùng horizon); Shapley/LMG cho đóng góp kênh; bootstrap SE"
+    outcome: "VN-Index return, phân rã 3 kênh theo horizon"
+    decides_gate: G2b
+    claim_ceiling: "transmission decomposition / predictive — KHÔNG causal (chưa structural ID, claims matrix 07v2 §6.4)"
+    registered: "2026-07-18"
+    status: registered
+
+# ---------------------------------------------------------------------------
+# ĐẾM SỐ LẦN THỬ (multiple-testing / Deflated Sharpe — docs/09 §2.7)
+# ---------------------------------------------------------------------------
+# Mỗi lần chạy 1 spec trên 1 outcome = 1 trial. Deflated Sharpe (Bailey-López de
+# Prado) phạt theo số trial. Cập nhật thủ công mỗi khi chạy một backtest/test mới.
+trial_log:
+  n_trials: 0
+  note: "G2a rerun (D3) chưa tính vào đây (research LP, chưa phải backtest tín hiệu). Đếm bắt đầu ở G3."
