@@ -90,11 +90,17 @@ $$
 \text{Level}_t      &= \ln(1+\text{GPR}_t) \\
 \text{Persistent}_t &= \mathbb{E}_{t-1}[\text{Level}_t] \quad(\text{AR/EWMA dự báo 1 bước, chỉ dùng quá khứ}) \\
 \boxed{\text{Innovation}_t} &= \text{Level}_t - \text{Persistent}_t \quad(\textbf{cú sốc chính cho Local Projection}) \\
-\text{Jump}_t       &= \max(0,\ z_t - q_{0.95}) \quad(\text{phần đuôi, sự kiện cực đoan})
+\text{Jump}_t       &= \max(0,\ z_t - q_{0.95}) \quad(\text{phần đuôi, sự kiện cực đoan}) \\
+\text{LevelPlusJump}_t &= \text{Level}_t + \text{Jump}_t
 \end{aligned}
 $$
 
 Áp dụng riêng cho threats và acts: $\text{GPT}^{\text{innov}}_t$, và $\text{GPA}^{\text{surprise}}_t$ (§2.2). **Quy tắc: mọi ký hiệu "shock" từ đây trở đi là innovation/surprise, KHÔNG phải level.**
+
+**Quy tắc thời điểm biết dữ liệu:** GPR daily của ngày $D$ chỉ vào information set từ
+$D+1$; các giá trị mới biết trong cuối tuần được gộp vào phiên kế tiếp. GPR monthly
+của tháng $M$ chỉ vào bucket quyết định $M+1$. Mọi backtest realtime vẫn phải lọc
+theo timestamp `available_at`, không chỉ dịch index theo ngày/tháng.
 
 ### 2.1. Vector shock
 

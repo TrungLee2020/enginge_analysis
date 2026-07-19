@@ -126,7 +126,7 @@ Nhịp sản phẩm phải theo nhịp mà tín hiệu tồn tại, không theo 
 │                                                             │
 │ ĐỘ TIN CẬY                                                  │
 │ Mẫu analogue nhỏ (n=6). Phân phối ước lượng trên panel       │
-│ tháng 1985–2026, n≈490. CI bootstrap theo khối.             │
+│ tháng 1995–2026, n≈378. CI bootstrap theo khối.             │
 │                                                             │
 │ TRACK RECORD: [xem lịch sử chấm điểm CRPS/Brier]            │
 └────────────────────────────────────────────────────────────┘
@@ -272,7 +272,7 @@ $\tau \in \{0.10,\ 0.25,\ 0.50,\ 0.75,\ 0.90\}$ → khớp skewed-$t$ → mật 
 
 Nghĩa là: **kết quả G2a có thể không sai — chỉ đo sai đại lượng.** OLS đo trung bình; hiện tượng nằm ở phân vị dưới.
 
-**Ràng buộc mẫu:** panel tháng 1985–2026 ≈ 490 quan sát. Tại $\tau=0.10$ còn ~49 điểm đuôi — đủ. **Không đi dưới $\tau=0.10$.** Ghi vào registry để sau không ai nới.
+**Ràng buộc mẫu:** panel tháng thực tế **~378 quan sát** (1995-01 → 2026-06). Bản trước viết "1985–2026 ≈ 490" — SAI: `innovation()` min_train=60 đốt 60 tháng đầu từ 1990 nên quan sát dùng được đầu tiên là 1995-01 (khớp smoke-test). Tại $\tau=0.10$ còn **~38 điểm đuôi** (không phải 49) — vẫn chạy được nhưng chật hơn, nên **Không đi dưới $\tau=0.10$** càng quan trọng. Ghi vào registry để sau không ai nới.
 
 **Suy diễn:** block bootstrap cho CI (LP có phần dư tự tương quan theo $h$).
 
@@ -370,7 +370,7 @@ regime flag (pre-2008 / 2008-2015 / post-2015)
 | `econometrics/surprise.py` | 🔴 stub | Bất ngờ chính sách cửa sổ hẹp (§5.6) |
 | `econometrics/ladder.py` | 🔴 stub | V1 rule-based |
 | `econometrics/analogue.py` | ❌ mới | §6 |
-| `data/dataset.py` | ✅ | Thêm cước vận tải. Bật nhánh monthly macro outcomes (cần viết `build_monthly_panel()` — CHƯA có, xem E3) |
+| `econometrics/data_files.py` | ✅ | `build_monthly_panel()` đã có: monthly macro, GPR global/VN và freight tùy chọn; GPR tháng M canh vào bucket M+1 |
 | `scoring/statement_scorer.py` | 🔴 stub | Pipeline 2 tầng: encoder lọc (ngưỡng ~0.6) → LLM chấm. `temperature=0.1`, JSON nghiêm ngặt, zero-shot. Thêm trường `channel` |
 | `scoring/policy_scorer.py` | ❌ mới | Rubric riêng (§5.6) |
 | `scoring/track_record.py` | ❌ mới | CRPS/Brier, lịch sử công khai (R2) |
@@ -456,7 +456,7 @@ Vẽ `LEVEL`, `PERSISTENT`, `INNOVATION`, `JUMP` của GPRD, 2026-02-01 → 2026
 | `LEVEL` cao kéo dài, cả hai phẳng sau vài ngày | Sốc dai dẳng, innovation chỉ bắt ngày đầu | Cần cả `LEVEL` lẫn `JUMP` trong design matrix |
 
 **E2 — Số hạng đuôi.** 1 ngày. KĐ-N1.
-**E3 — Chuyển tần suất tháng + vĩ mô thực + tách kênh thô.** 2–3 ngày. KĐ-N2, KĐ-N4. **`build_monthly_panel()` CHƯA có** — D2 cố ý chỉ xây track daily (`build_tier2_panel`, tôn trọng #10), phần monthly hoãn sang đây. E3 phải viết mới, không phải "chạy nhánh có sẵn".
+**E3 — Chuyển tần suất tháng + vĩ mô thực + tách kênh thô.** `build_monthly_panel()` **đã có** và giữ grid tháng thật; GPR tháng M chỉ xuất hiện từ bucket M+1. Phần còn lại của E3 là nạp outcome vĩ mô thật, rolling orthogonalization và chạy KĐ-N2/KĐ-N4.
 **E4 — Hồi quy phân vị.** 3–5 ngày. KĐ-N3. Đây là bước biến engine thành sản phẩm bán được.
 
 ### Track P — Sản phẩm

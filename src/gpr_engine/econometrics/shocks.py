@@ -5,18 +5,19 @@ D4 G2b). Nguyen tac #9 (CLAUDE.md): shock la INNOVATION, khong phai level.
 
 Sau bien (tat ca ROLLING, chi dung qua khu — no leakage):
     LEVEL       = ln(1+GPR)                          (giu doi chung, KHONG vao hoi quy shock)
-    PERSISTENT  = Ê_{t-1}[LEVEL]   (AR(p) one-step forecast, p chon bang AIC/dev window)
+    PERSISTENT  = Ê_{t-1}[LEVEL]   (AR(p) one-step forecast, p chon bang BIC/dev window)
     INNOVATION  = LEVEL − PERSISTENT                 ← shock chinh
     JUMP        = max(0, z_t − q95_rolling)          (duoi, su kien cuc doan)
+    LEVEL+JUMP  = LEVEL + JUMP                       (shock dai dang + thanh phan duoi)
     GPT_INNOV   = INNOVATION rieng cho threats (GPRD_THREAT)
     GPA_SURPRISE_V1 = GPA − Ê[GPA | GPT lags, GPA lags]   (surrogate, xem ghi chu)
 
-Ky luat chong data-snooping (docs/10 §5): order p cua AR chon bang AIC TREN
+Ky luat chong data-snooping (docs/10 §5): order p cua AR chon bang BIC TREN
 DEVELOPMENT WINDOW ONLY (2015-2020), roi KHOA. Khong thu nhieu spec roi chon
 cai dep tren toan mau.
 
 PERSISTENT dung AR(p) (khong EWMA) — quyet dinh 2026-07-18: chuan kinh te luong
-hon, order chon bang AIC. EWMA giu lam phuong an doi chung neu can sau.
+hon, order chon bang BIC. AIC/EWMA chi giu lam phuong an doi chung neu can sau.
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ from statsmodels.tsa.ar_model import AutoReg
 
 from .dataset import log1p_gpr
 
-# Development window (config/backtest.yaml split.development) — AIC chi nhin day.
+# Development window (config/backtest.yaml split.development) — BIC chi nhin day.
 DEV_WINDOW = ("2015-01-01", "2020-12-31")
 
 
@@ -172,6 +173,19 @@ def jump(
     return j.rename(raw_or_level.name).reindex(raw_or_level.index)
 
 
+def level_plus_jump(
+    level: pd.Series,
+    jump_component: pd.Series,
+    name: str = "LEVEL+JUMP",
+) -> pd.Series:
+    """LEVEL+JUMP = LEVEL + JUMP; khong duoc thay LEVEL bang INNOVATION.
+
+    Helper nay la shock contract dung chung cho E1b, E1c va specification curve,
+    tranh lap lai bug cu `INNOVATION + JUMP` nhung gan nhan `LEVEL+JUMP`.
+    """
+    return level.add(jump_component).rename(name)
+
+
 # ---------------------------------------------------------------------------
 # GPA_SURPRISE_V1 — surrogate (spec day du can S-GPR + Ladder, chua ton tai)
 # ---------------------------------------------------------------------------
@@ -246,6 +260,8 @@ def build_shocks(
         out[f"{s}_PERSISTENT"] = pers
         out[f"{s}_INNOV"] = level - pers
         out[f"{s}_JUMP"] = jump(raw, window=jump_window)
+        out[f"{s}_LEVEL_PLUS_JUMP"] = level_plus_jump(
+            level, out[f"{s}_JUMP"], name=f"{s}_LEVEL_PLUS_JUMP")
 
     out.attrs["ar_orders"] = chosen
     out.attrs["ar_window"] = ar_window
@@ -259,6 +275,7 @@ __all__ = [
     "persistent_ar",
     "innovation",
     "jump",
+    "level_plus_jump",
     "gpa_surprise_v1",
     "build_shocks",
 ]

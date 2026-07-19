@@ -69,13 +69,15 @@ def fill_weekend(gpr: pd.Series, trading_days) -> pd.Series:
     g.index = pd.to_datetime(g.index)
     g = g.sort_index()
 
+    if trading.empty:
+        return pd.Series(dtype=float, index=trading)
+
     out = {}
-    prev = None
+    # Gioi han cua so dau tien o phien lam viec truoc do. Ban cu lay TOAN BO
+    # lich su <= ngay dau tien neu caller bat dau giua mau, lam sai gia tri dau.
+    prev = trading[0] - pd.offsets.BDay(1)
     for d in trading:
-        if prev is None:
-            window = g.loc[g.index <= d]
-        else:
-            window = g.loc[(g.index > prev) & (g.index <= d)]
+        window = g.loc[(g.index > prev) & (g.index <= d)]
         out[d] = window.mean() if len(window) else np.nan
         prev = d
     return pd.Series(out).reindex(trading)

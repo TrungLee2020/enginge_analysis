@@ -3,8 +3,8 @@
 Kiem chung:
   - transform_gpr_shocks: zscore (mean0/std1) vs log1p.
   - splice_dxy_returns: broad uu tien, fallback major, dung return.
-  - build_tier2_panel: luoi business-day lien tuc, complete-case (khong NaN),
-    shift(k) khong vuot khe NaN (monkeypatch I/O de khong dung FRED/file).
+  - build_tier2_panel: chi giu phien macro that, complete-case (khong NaN).
+  - information time: GPR D chi dung tu D+1, tin cuoi tuan vao phien tiep theo.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import pytest
 
 from gpr_engine.econometrics import data_files as df_mod
 from gpr_engine.econometrics.data_files import (
+    align_daily_gpr_to_information_time,
     build_tier2_panel,
     splice_dxy_returns,
     transform_gpr_shocks,
@@ -54,7 +55,7 @@ def test_splice_dxy_broad_priority_and_fallback():
     assert dxy.loc[idx[1]] == pytest.approx(np.log(101 / 100), abs=1e-9)
 
 
-def test_build_tier2_panel_contiguous_and_complete(monkeypatch):
+def test_build_tier2_panel_uses_observed_macro_days_and_is_complete(monkeypatch):
     # GPR daily gia (ngay lich, gom ca cuoi tuan)
     cal = pd.date_range("2020-01-01", "2020-02-29", freq="D")
     gpr = pd.DataFrame({s: np.arange(len(cal), dtype=float)
@@ -76,16 +77,32 @@ def test_build_tier2_panel_contiguous_and_complete(monkeypatch):
         df_mod, "load_macro_transformed",
         lambda *a, **k: macro)
 
-    panel = build_tier2_panel(start="2020-01-01", end="2020-02-29", ffill_limit=3)
+    panel = build_tier2_panel(
+        start="2020-01-01", end="2020-02-29", ffill_limit=3,
+        shock_method="zscore")
 
     # 1) khong con NaN (complete-case)
     assert not panel.isna().any().any()
-    # 2) index la business-day lien tuc (khong co thu 7/CN)
+    # 2) chi co phien business-day that, khong tao return gia bang forward-fill
     assert (panel.index.dayofweek < 5).all()
-    # 3) index tang deu, khong lap
+    assert bdays[5] not in panel.index
+    assert bdays[10] not in panel.index
+    # 3) index tang, khong lap
     assert panel.index.is_monotonic_increasing and panel.index.is_unique
     # 4) co du cot macro + shock
     for c in ["oil", "vix", "us10y", "dxy", "GPRD", "GPRD_ACT", "GPRD_THREAT"]:
         assert c in panel.columns
     # 5) shock da z-score (mean~0)
     assert abs(panel["GPRD"].mean()) < 3.0  # z-score tren mau goc, sub-slice lech nhe
+
+
+def test_daily_gpr_is_available_d_plus_one_and_weekend_rolls_forward():
+    """Fri/Sat/Sun news chi vao Monday; Monday news chi vao Tuesday."""
+    idx = pd.date_range("2020-01-03", "2020-01-06", freq="D")  # Fri..Mon
+    gpr = pd.DataFrame({"GPRD": [3.0, 5.0, 7.0, 11.0]}, index=idx)
+    decisions = pd.DatetimeIndex(["2020-01-06", "2020-01-07"])
+
+    out = align_daily_gpr_to_information_time(gpr, decisions, publish_lag_days=1)
+
+    assert out.loc[pd.Timestamp("2020-01-06"), "GPRD"] == pytest.approx(5.0)
+    assert out.loc[pd.Timestamp("2020-01-07"), "GPRD"] == pytest.approx(11.0)

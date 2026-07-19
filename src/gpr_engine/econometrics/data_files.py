@@ -19,9 +19,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..ingest.gpr_daily import PUBLISH_LAG_DAYS as GPR_DAILY_PUBLISH_LAG_DAYS
 from ..ingest.gpr_daily import SERIES as GPR_DAILY_SERIES
 from ..ingest.market_data import FRED_MAP
-from .dataset import dlog, log1p_gpr, transform_global_macro
+from .dataset import dlog, fill_weekend, log1p_gpr, transform_global_macro
 
 DEFAULT_GPR_DAILY = "data/data_gpr_daily_recent.xls"
 DEFAULT_CACHE_DIR = "data/cache"
@@ -52,24 +53,21 @@ def load_gpr_daily(path: str = DEFAULT_GPR_DAILY) -> pd.DataFrame:
     return df.set_index("date").sort_index()
 
 
-def transform_gpr_shocks(gpr_wide: pd.DataFrame, method: str = "zscore") -> pd.DataFrame:
+def transform_gpr_shocks(gpr_wide: pd.DataFrame, method: str = "innovation") -> pd.DataFrame:
     """Bien doi shock GPR daily cho hoi quy tang 2. Giu ten cot goc.
 
     method:
       - "innovation" (G2.0, docs/07v2 §2.0): shock = LEVEL − Ê_{t-1}[LEVEL], AR(p)
-        rolling one-step (p chon bang AIC tren dev window). Day la SHOCK HOP LE cho
+        rolling one-step (p chon bang BIC tren dev window). Day la SHOCK HOP LE cho
         hoi quy tang 2 (CLAUDE.md #9). Cot giu ten goc (GPRD -> GPRD la innovation).
       - "zscore" (LEVEL, doi chung): chuan hoa (x-mean)/std. GPRD ~ 10..370, γ doc la
         "phan ung / 1 do lech chuan". La LEVEL -> run_tier2 tu danh dau INELIGIBLE (#9).
-      - "log1p": log(1+GPR). Quy uoc docs/07 §0 danh RIENG cho country-GPR nuoc nho
-        (mean/std ≈ 0.05, lech phai manh). Ap len GPRD toan cau se ep 370→5.9, lam
-        phang spike khung hoang -> KHONG dung cho daily global. Giu tuy chon de tuong thich.
-
-    Tai sao khong log1p GPRD: docs/07 §0 bien minh log1p bang phan phoi country-GPR
-    nuoc nho; GPRD daily khong thuoc phan phoi do. Standardize giu duoc bien do spike.
+      - "log1p": LEVEL = log(1+GPR), chi dung lam doi chung khi goi truc tiep.
+        Innovation cung xay tren LEVEL log1p theo contract docs/07 §0; JUMP tinh
+        rieng tren raw rolling de giu thong tin spike/duoi.
     """
     if method == "innovation":
-        # innovation() log1p GPR thanh LEVEL roi tru persistent; ap tung cot, order/AIC.
+        # innovation() log1p GPR thanh LEVEL roi tru persistent; ap tung cot, order/BIC.
         from .shocks import innovation
         return gpr_wide.apply(lambda col: innovation(col))
     if method == "log1p":
@@ -78,6 +76,40 @@ def transform_gpr_shocks(gpr_wide: pd.DataFrame, method: str = "zscore") -> pd.D
         return (gpr_wide - gpr_wide.mean()) / gpr_wide.std()
     raise ValueError(
         f"method khong ho tro: {method!r} (dung 'innovation' | 'zscore' | 'log1p')")
+
+
+def align_daily_gpr_to_information_time(
+    gpr: pd.DataFrame,
+    decision_days: Iterable[pd.Timestamp],
+    publish_lag_days: int = GPR_DAILY_PUBLISH_LAG_DAYS,
+) -> pd.DataFrame:
+    """Gan GPR vao phien DA BIET du lieu, khong vao ngay bao chi duoc dem.
+
+    GPR cua ngay D duoc publish som nhat o D+publish_lag_days. Moi phien quyet
+    dinh nhan trung binh cac gia tri moi biet tu sau phien truoc; vi vay tin
+    Thu Bay/Chu Nhat khong bi loai ma di vao phien tiep theo.
+    """
+    days = pd.DatetimeIndex(pd.to_datetime(list(decision_days))).sort_values().unique()
+    known = gpr.copy()
+    known.index = pd.to_datetime(known.index) + pd.Timedelta(days=publish_lag_days)
+    return pd.DataFrame(
+        {col: fill_weekend(known[col], days) for col in known.columns},
+        index=days,
+    )
+
+
+def align_monthly_gpr_to_information_time(
+    obj: pd.Series | pd.DataFrame,
+) -> pd.Series | pd.DataFrame:
+    """Gan gia tri thang M vao bucket quyet dinh M+1.
+
+    GPR monthly tong hop ca thang M va chi publish sau khi M ket thuc. Track
+    monthly khong bieu dien duoc gio/ngay +5, nen bucket som nhat hop le la M+1;
+    caller realtime van phai ap dung available_at chinh xac.
+    """
+    out = obj.copy()
+    out.index = pd.DatetimeIndex(pd.to_datetime(out.index)) + pd.offsets.MonthBegin(1)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -202,24 +234,21 @@ def build_tier2_panel(
     cache_dir: str = DEFAULT_CACHE_DIR,
     refresh: bool = False,
     macro_vars: Iterable[str] = CORE_MACRO,
-    shock_method: str = "zscore",
+    shock_method: str = "innovation",
     ffill_limit: int = 3,
 ) -> pd.DataFrame:
-    """Panel san sang cho estimate_tier2, tren LUOI NGAY GIAO DICH LIEN TUC.
+    """Panel san sang cho estimate_tier2 tren cac phien macro cung quan sat.
 
-    Vi sao khong join "inner" tho: GPRD la ngay lich, macro la business day, va
-    cac chuoi FRED thua ngay le khac nhau -> panel co NaN rai rac. estimate_tier2
-    dropna THEO TUNG horizon nen moi horizon chay tren mau khac nhau (lech uoc
-    luong) va shift(k) cho AR-lag vuot qua khe NaN. Sua: dung luoi bdate lien tuc,
-    ffill macro toi da ffill_limit ngay (le/holiday), roi complete-case 1 lan.
+    Dung giao cac ngay macro THUC SU co du lieu, khong forward-fill return/difference
+    qua ngay nghi (lam vay se tao quan sat gia). GPR ngay D duoc can theo
+    available_at D+1; cac gia tri moi biet giua hai phien duoc trung binh vao phien
+    tiep theo, nen tin cuoi tuan khong bi mat.
 
     Params
     ------
     macro_vars : cac kenh macro dua vao (mac dinh CORE_MACRO = du 4 kenh; dxy da noi dai).
-    shock_method : "zscore" (mac dinh, cho GPRD toan cau) | "log1p".
-    ffill_limit : so ngay toi da ffill gia tri macro qua ngay le.
-
-    Truc thoi gian la bdate_range lien tuc -> shift(k) = dung 1 ngay giao dich.
+    shock_method : "innovation" (mac dinh hop le) | "zscore"/"log1p" (LEVEL doi chung).
+    ffill_limit : giu de tuong thich API; macro transformed KHONG con duoc ffill.
     """
     gpr_raw = load_gpr_daily(gpr_path)
     gpr = transform_gpr_shocks(gpr_raw, method=shock_method)
@@ -228,14 +257,16 @@ def build_tier2_panel(
     cols = [c for c in macro_vars if c in macro.columns]
     macro = macro[cols]
 
-    end_ts = pd.Timestamp(end) if end else max(macro.index.max(), gpr.index.max())
-    grid = pd.bdate_range(pd.Timestamp(start), end_ts)
-
-    macro_g = macro.reindex(grid).ffill(limit=ffill_limit)
-    gpr_g = gpr.reindex(grid).ffill(limit=ffill_limit)
+    # `ffill_limit` la tham so legacy. Khong ffill oil/dxy returns hay yield diff:
+    # lap lai gia tri cu qua holiday se tao mot quan sat thi truong khong ton tai.
+    _ = ffill_limit
+    macro = macro.sort_index().loc[start:end] if end else macro.sort_index().loc[start:]
+    macro_g = macro.dropna()
+    decision_days = macro_g.index
+    gpr_g = align_daily_gpr_to_information_time(gpr, decision_days)
 
     panel = macro_g.join(gpr_g, how="inner").sort_index()
-    # Complete-case 1 lan -> moi horizon dung cung mau, AR-lag khong vuot NaN.
+    # Complete-case 1 lan -> moi horizon khong thay doi mau vi NaN rai rac.
     return panel.dropna()
 
 
@@ -267,11 +298,26 @@ def load_gpr_monthly(path: str = DEFAULT_GPR_MONTHLY) -> pd.DataFrame:
 # Phủ 1990+ monthly (đủ mẫu). Điểm nghẽn Hormuz/Malacca không nằm trong 4 kênh
 # Oil/DXY/VIX/US10Y; Malacca là cửa ngõ thương mại VN → biến generic nhưng nước
 # xuất khẩu châu Á nhạy hơn. Là CHỈ SỐ GIÁ monthly → Δln.
+#
+# ⚠️ CẢNH BÁO DIỄN GIẢI (bắt buộc đọc trước khi dùng hệ số freight):
+# PCU483111483111 là PPI Mỹ cho vận tải biển viễn dương — khảo sát, hàng tháng,
+# DÍNH (sticky), là giá doanh nghiệp Mỹ thu. Nó ĐO TRUYỀN DẪN CHI PHÍ vận tải vào
+# giá sản xuất, KHÔNG đo gián đoạn điểm nghẽn (Hormuz/Malacca) — một chỉ số khảo
+# sát dính sẽ LÀM MƯỢT đúng cái đuôi sắc mà giả thuyết tắc nghẽn cần thấy. Chọn
+# series này vì phủ 1990+ (spot rate như Baltic Dry mẫu ngắn hơn nhiều); đánh đổi
+# hợp lý nhưng KHÔNG được đọc hệ số freight như "đo tắc nghẽn". Nếu có chuỗi cước
+# GIAO NGAY (Baltic Dry / container spot) → đưa vào làm ROBUSTNESS mẫu ngắn, đó mới
+# là thước đo khớp giả thuyết Hormuz/Malacca.
 FRED_FREIGHT = "PCU483111483111"
 
 
 def transform_freight(raw: pd.Series) -> pd.Series:
-    """Freight PPI (mức giá) -> Δln (log-return), giữ tên 'freight'."""
+    """Freight PPI (mức giá) -> Δln (log-return), giữ tên 'freight'.
+
+    ⚠️ Đo TRUYỀN DẪN CHI PHÍ vận tải vào giá sản xuất (PPI khảo sát dính), KHÔNG
+    đo tắc nghẽn điểm nghẽn Hormuz/Malacca. Xem cảnh báo ở FRED_FREIGHT. Mọi report
+    dùng cột này phải ghi lại cách diễn giải này.
+    """
     return dlog(raw).rename("freight")
 
 
@@ -301,6 +347,20 @@ def load_freight_monthly(
     cache.parent.mkdir(parents=True, exist_ok=True)
     s.to_frame().to_csv(cache)
     return s
+
+
+def freight_vintage(cache_dir: str = DEFAULT_CACHE_DIR) -> str | None:
+    """Hash sha256[:12] của cache freight (vintage FRED). None nếu chưa cache.
+
+    #4 (docs review): data_version hiện chỉ hash GPRD → hai lần chạy với vintage
+    FRED freight KHÁC NHAU (PPI có hiệu chỉnh hồi tố!) mang cùng data_version. Report
+    nào dùng freight PHẢI ghi riêng `freight_vintage` này vào metadata để audit được.
+    """
+    import hashlib
+    cache = Path(cache_dir) / "freight_raw.csv"
+    if not cache.exists():
+        return None
+    return hashlib.sha256(cache.read_bytes()).hexdigest()[:12]
 
 
 def load_macro_monthly(
@@ -375,6 +435,12 @@ def build_monthly_panel(
     vnm_orth = orthogonalize(lg, target="vnm", on=["gpr"])   # residual = VN rieng
     vnm_orth_innov = innovation(vnm_orth, is_level=True, min_train=min_train,
                                 max_order=max_order).rename("GPRC_VNM_ORTH_INNOV")
+
+    # Gia tri cua thang M chi duoc dung trong bucket M+1 (sau khi thang M ket
+    # thuc). Khong join GPR thang M voi outcome cung thang M nhu the da biet tu
+    # dau thang.
+    gpr_innov = align_monthly_gpr_to_information_time(gpr_innov)
+    vnm_orth_innov = align_monthly_gpr_to_information_time(vnm_orth_innov)
 
     macro = load_macro_monthly(start, end, cache_dir, refresh)
     cols = [c for c in macro_vars if c in macro.columns]

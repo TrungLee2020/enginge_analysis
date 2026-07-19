@@ -11,7 +11,10 @@ import pandas as pd
 import pytest
 
 from gpr_engine.econometrics import data_files as df_mod
-from gpr_engine.econometrics.data_files import build_monthly_panel
+from gpr_engine.econometrics.data_files import (
+    align_monthly_gpr_to_information_time,
+    build_monthly_panel,
+)
 
 
 def _fake_monthly(n: int = 200, seed: int = 0) -> pd.DataFrame:
@@ -87,3 +90,16 @@ def test_no_gprc_vnm_raw_column(patched):
     """GPRC_VNM THO khong duoc lo ra panel (chi ban orthogonalized+innovation)."""
     panel = build_monthly_panel()
     assert "GPRC_VNM" not in panel.columns, "GPRC_VNM tho khong duoc vao panel (#9: phai innovation)"
+
+
+def test_monthly_gpr_is_used_in_next_month_bucket():
+    """GPR tong hop thang M khong duoc coi la da biet tu dau thang M."""
+    source = pd.Series(
+        [1.0, 2.0],
+        index=pd.DatetimeIndex(["2020-01-01", "2020-02-01"]),
+        name="GPR_INNOV",
+    )
+    out = align_monthly_gpr_to_information_time(source)
+    expected = pd.DatetimeIndex(["2020-02-01", "2020-03-01"])
+    pd.testing.assert_index_equal(out.index, expected)
+    assert out.loc["2020-02-01"] == 1.0

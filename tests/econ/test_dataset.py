@@ -64,6 +64,14 @@ def test_fill_weekend_forward_to_trading_day():
     assert list(out.index) == list(trading)
 
 
+def test_fill_weekend_first_window_does_not_average_all_history():
+    dates = pd.date_range("2022-01-01", "2022-01-10", freq="D")
+    gpr = pd.Series(np.arange(1.0, 11.0), index=dates)
+    out = ds.fill_weekend(gpr, trading_days=pd.DatetimeIndex(["2022-01-10"]))
+    # First requested session is Monday: only Sat/Sun/Mon, not Jan 1..10.
+    assert out.loc[pd.Timestamp("2022-01-10")] == pytest.approx(9.0)
+
+
 def test_align_frames_inner_join_on_time():
     a = pd.DataFrame({"x": [1, 2, 3]}, index=pd.date_range("2020-01-01", periods=3))
     b = pd.DataFrame({"y": [4, 5]}, index=pd.date_range("2020-01-02", periods=2))

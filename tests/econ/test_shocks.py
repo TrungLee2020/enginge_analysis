@@ -7,7 +7,7 @@ gia tri tuong lai nao KHONG duoc lam doi innovation o thoi diem <= t.
 Cac test hanh vi (sanity kinh te luong):
   - white noise: innovation ~ chinh no (khong co gi de du bao).
   - AR(1) manh: innovation ~ residual, autocorr thap hon HAN level.
-  - AIC chon p tren dev window: fit khop cau truc biet truoc (AR(2)).
+  - BIC chon p tren dev window: fit khop cau truc biet truoc (AR(2)).
   - JUMP: chi duong o duoi tren nguong q95 rolling.
 """
 from __future__ import annotations
@@ -20,6 +20,7 @@ from gpr_engine.econometrics.shocks import (
     build_shocks,
     innovation,
     jump,
+    level_plus_jump,
     persistent_ar,
     select_ar_order,
 )
@@ -159,6 +160,16 @@ def test_jump_no_lookahead():
     pd.testing.assert_series_equal(left, j2.reindex(left.index), check_names=False)
 
 
+def test_level_plus_jump_uses_level_not_innovation():
+    """Contract: LEVEL+JUMP phai dung LEVEL, khong phai INNOVATION+JUMP."""
+    idx = pd.date_range("2020-01-01", periods=3)
+    level = pd.Series([1.0, 2.0, 3.0], index=idx)
+    jmp = pd.Series([0.0, 0.5, 1.0], index=idx)
+    out = level_plus_jump(level, jmp)
+    expected = pd.Series([1.0, 2.5, 4.0], index=idx, name="LEVEL+JUMP")
+    pd.testing.assert_series_equal(out, expected)
+
+
 # ---------------------------------------------------------------------------
 # 5) BUILD_SHOCKS — orchestrator
 # ---------------------------------------------------------------------------
@@ -167,7 +178,8 @@ def test_build_shocks_columns_and_levels():
     s = _ar_series(500, [0.6], sigma=1.0, seed=8)
     gpr = pd.DataFrame({"GPRD": np.abs(s) * 10})  # gia tri duong nhu GPR that
     out = build_shocks(gpr, series=["GPRD"], ar_window=DEV, max_order=4)
-    for suffix in ["GPRD_LEVEL", "GPRD_PERSISTENT", "GPRD_INNOV", "GPRD_JUMP"]:
+    for suffix in ["GPRD_LEVEL", "GPRD_PERSISTENT", "GPRD_INNOV", "GPRD_JUMP",
+                   "GPRD_LEVEL_PLUS_JUMP"]:
         assert suffix in out.columns, f"thieu cot {suffix}"
     # LEVEL = log1p cua gia tri tho
     lvl = out["GPRD_LEVEL"].dropna()
@@ -183,3 +195,12 @@ def test_build_shocks_innovation_equals_level_minus_persistent():
     both = pd.concat([recon.rename("a"), out["GPRD_INNOV"].rename("b")], axis=1).dropna()
     assert len(both) > 0
     np.testing.assert_allclose(both["a"].values, both["b"].values, atol=1e-9)
+
+
+def test_build_shocks_level_plus_jump_contract():
+    s = _ar_series(500, [0.7], sigma=1.0, seed=10)
+    gpr = pd.DataFrame({"GPRD": np.abs(s) * 10})
+    out = build_shocks(gpr, series=["GPRD"], ar_window=DEV, max_order=3)
+    expected = out["GPRD_LEVEL"] + out["GPRD_JUMP"]
+    pd.testing.assert_series_equal(
+        out["GPRD_LEVEL_PLUS_JUMP"], expected.rename("GPRD_LEVEL_PLUS_JUMP"))

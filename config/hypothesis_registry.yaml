@@ -163,11 +163,11 @@ hypotheses:
     registered: "2026-07-19"
     status: registered      # exo chưa chạy được — chặn bởi gold set (G-Gold)
     note: >
-      Bản ENDO (đối chứng) đã chạy: rank AUC LEVEL > LEVEL+JUMP > JUMP > INNOVATION
-      — LEVEL thắng đúng như §2.5 dự đoán khi sự kiện nội sinh (xác nhận chẩn đoán
-      §1.1). Bản EXO (bản DÙNG) chặn bởi data/gold_events.csv (chưa có). KHÔNG chốt
-      ô chính từ endo. AR order/shocks giống KĐ-E1b, LEVEL là ngoại lệ measurement
-      (không phải shock hồi quy nên #9 không áp).
+      Bản ENDO cũ KHÔNG CÒN HỢP LỆ: code đã gắn nhãn LEVEL+JUMP nhưng thực tế tính
+      INNOVATION+JUMP. Contract đã khóa lại thành LEVEL+JUMP := LEVEL + JUMP; phải
+      chạy lại ENDO bằng code mới trước khi đọc ranking. Bản EXO (bản DÙNG) vẫn chặn
+      bởi data/gold_events.csv. KHÔNG chốt ô chính từ endo. LEVEL là ngoại lệ
+      measurement (không phải shock hồi quy nên #9 không áp).
 
 # ---------------------------------------------------------------------------
 # SPECIFICATION CURVE (docs/12) — entry đơn cho lưới 384 spec (SHOCK 4 mức)
@@ -183,15 +183,29 @@ specification_curves:
     type: specification_curve
     statement: >
       Tác động của cú sốc địa chính trị lên kết quả vĩ mô khác 0, kiểm định chung
-      trên toàn bộ tập spec hợp lệ (6 chiều, 384 spec sau khi thêm LEVEL, docs/13 §4.2).
+      trên tập spec hợp lệ. TÁI CẤU TRÚC 2026-07-19 (review docs/13-hậu §1): outcome
+      là TRỤC BÁO CÁO (một curve mỗi outcome), KHÔNG phải chiều lưới; FREQ tách riêng.
+      Mỗi curve = 96 spec cơ sở × FREQ (2 mức cho giá tài sản, 1 cho vĩ mô thực/freight).
+    grid_dimensions:                # chiều lưới (cho MỖI curve)
+      shock: [INNOVATION, JUMP, "LEVEL+JUMP", LEVEL]   # LEVEL+JUMP := LEVEL + JUMP; +LEVEL sau E0 PASS
+      freq: [daily, monthly]        # tách khỏi biến đích (bỏ FREQ_OUTCOME cũ)
+      funcform: [OLS, "quantile_tau_.10/.25/.50/.75/.90"]
+      channel: [pooled, act_threat_split]
+      jump_thresh: [q95, q99]       # chỉ khi shock có JUMP
+      sample: [full, exclude_2026]
+    report_axis_outcome:            # TRỤC báo cáo — mỗi cái 1 curve riêng (KHÔNG gộp)
+      asset_price: [oil, dxy, vix, us10y]        # 192 spec/curve (2 FREQ)
+      real_macro: [IP, CPI, infl_expectation]    # 96 spec/curve (1 FREQ)
+      physical_channel: [freight]                # 96 spec/curve; freight_vintage vào metadata
     primary_cell:
-      shock: UNRESOLVED         # E1b LEVEL+JUMP BỊ BÁC (docs/13 §1 — episode nội sinh).
-                                # Chốt sau E1c-exo (KĐ-E1c) hoặc để MỞ (docs/13 §3.1: 4 mức, Holm 4×H).
-      freq_outcome: monthly_real_macro
+      outcome: IP                   # curve chính (vĩ mô thực, track tháng)
+      shock: UNRESOLVED             # E1b LEVEL+JUMP BỊ BÁC (docs/13 §1). Chốt sau E1c-exo hoặc MỞ (§3.1: 4 mức, Holm 4×H).
+      freq: monthly
       funcform: quantile_tau_0.10
       channel: act_threat_split
       jump_thresh: q95
       sample: full
+      focal_horizons: [6, 12]       # track tháng (ngày: [5,20]) — khóa trước, giảm tải bootstrap ~12× (docs/12 §5.1)
     test_statistics: [median_effect, share_significant, stouffer_z]
     null_distribution:
       method: moving_block_bootstrap_under_null
@@ -202,11 +216,10 @@ specification_curves:
       method: lag_augmented_LP
       se: white
       bands: sup_t_simultaneous
-    shock_dimension: [INNOVATION, JUMP, "LEVEL+JUMP", LEVEL]   # +LEVEL sau E0 PASS (docs/13 §4.2)
     status: registered_not_run
     # DONE: build_monthly_panel, E0 replication PASS, holdout ghi g0 §2 (tách track ngày/tháng).
     # docs/13 phát hiện E1b bị bác → cổng mới G-Gold/G-E1c/G-Primary trước khi chạy.
-    blockers: [gold_events_csv, E1c_exo, primary_cell_shock_resolved]
+    blockers: [E1c_endo_rerun, gold_events_csv, E1c_exo, primary_cell_shock_resolved]
     commitment: >
       Báo cáo TOÀN BỘ đường cong bất kể kết quả. Không ô nào bị loại khỏi report
       sau khi đã chạy. Không chạm holdout.

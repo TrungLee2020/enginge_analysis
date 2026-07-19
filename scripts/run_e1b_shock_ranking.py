@@ -34,6 +34,7 @@ from gpr_engine.econometrics.data_files import DEFAULT_GPR_DAILY, load_gpr_daily
 from gpr_engine.econometrics.dataset import log1p_gpr  # noqa: E402
 from gpr_engine.econometrics.shocks import (  # noqa: E402
     jump,
+    level_plus_jump,
     persistent_ar,
     select_ar_order,
 )
@@ -102,7 +103,7 @@ def compute(gpr_path: str = DEFAULT_GPR_DAILY) -> tuple[dict, dict]:
     innov = (level - persistent_ar(level, order=p, min_train=ROLL)).rename("INNOVATION")
     jmp = jump(gprd, window=ROLL, q=0.95).rename("JUMP")
     common = innov.dropna().index.intersection(jmp.dropna().index)
-    lvl_jump = (innov.reindex(common) + jmp.reindex(common)).rename("LEVEL+JUMP")
+    lvl_jump = level_plus_jump(level.reindex(common), jmp.reindex(common))
 
     measures = {"INNOVATION": innov, "JUMP": jmp, "LEVEL+JUMP": lvl_jump}
     events = find_events(gprd)

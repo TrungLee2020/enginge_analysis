@@ -37,6 +37,7 @@ from gpr_engine.econometrics.data_files import DEFAULT_GPR_DAILY, load_gpr_daily
 from gpr_engine.econometrics.dataset import log1p_gpr  # noqa: E402
 from gpr_engine.econometrics.shocks import (  # noqa: E402
     jump,
+    level_plus_jump,
     persistent_ar,
     select_ar_order,
 )
@@ -163,7 +164,7 @@ def build_measures(gprd: pd.Series) -> dict[str, pd.Series]:
     return {
         "INNOVATION": innov.reindex(common),
         "JUMP": jmp.reindex(common),
-        "LEVEL+JUMP": (innov.reindex(common) + jmp.reindex(common)).rename("LEVEL+JUMP"),
+        "LEVEL+JUMP": level_plus_jump(level.reindex(common), jmp.reindex(common)),
         "LEVEL": level.reindex(common).rename("LEVEL"),
     }, p
 

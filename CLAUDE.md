@@ -51,15 +51,15 @@ Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, line
 - **G2a rerun (D3) done, CHỜ HUMAN REVIEW:** `docs/reports/G2a_innovation_*_ar5-5-2.md`. GPRD innovation → macro: VIX kênh mạnh nhất (13/31 h) nhưng **dấu âm ở h dài — phản trực giác, cần soi**. Verdict = PENDING HUMAN REVIEW (máy chấm 1/2/3/5; user quyết 4/6). Mục human review còn trống.
 - **E1 done:** `docs/reports/E1_shock_diagnosis_*.md`. Bằng chứng cứng: cú sốc Hormuz (GPRD→500.8 ngày 2026-03-02) NẰM TRONG mẫu G2a mà γ(oil)≈0. **AR(5) nén INNOVATION xuống 2.77× ngày thường trong khi JUMP giữ percentile 99.9** → JUMP nên là shock chính (docs/11 §5.2 KĐ-N1).
 
-- **E1b done:** `docs/reports/E1b_shock_ranking_*.md`. Rank thước đo shock theo sức phát hiện 166 episode lớn: **LEVEL+JUMP 68.7% > JUMP 55.4% > INNOVATION 32.5%** (winner đứng đầu mọi sub-sample). → ô chính SCA-01 (`primary_cell.shock=LEVEL+JUMP`) đã điền trong registry. Thêm `tests/test_report_guard_p1.py` (Guard P1: mọi số narrative khớp payload).
+- **E1b archived/superseded:** ngoài lỗi episode nội sinh của docs/13, code cũ còn gắn nhãn `LEVEL+JUMP` cho `INNOVATION+JUMP`. Contract đã khóa lại thành `LEVEL+JUMP := LEVEL + JUMP`; report E1b cũ chỉ là artifact lịch sử, không dùng chốt ô chính.
 
-- **`build_monthly_panel()` done** (2026-07-19): `data_files.build_monthly_panel` — track monthly, grid dầu-tháng thật (KHÔNG forward-fill, #10). Cột: `GPR_INNOV` (β), `GPRC_VNM_ORTH_INNOV` (λ — orthogonalize khỏi GPR global rồi innovation), macro tổng hợp tháng. 378 tháng 1995-2026, corr(β,λ)=−0.21. 6 test.
+- **`build_monthly_panel()` implemented** (2026-07-19): track monthly, grid đầu-tháng thật (KHÔNG forward-fill, #10). GPR tháng M được canh information-time vào bucket M+1. Cột: `GPR_INNOV` (β), `GPRC_VNM_ORTH_INNOV` (λ), macro tổng hợp tháng. Rolling orthogonalization/vintage là Phase 2; test mới chưa được chạy trong phiên sửa này.
 - **E0 replication PASS** (2026-07-19): `scripts/run_e0_replication.py` — tái lập C-I 2022 (GPR→IP giảm h=1,2 p<0.10, đáy β=−0.37 h=2). Pipeline (nạp+align+LP+HAC) ĐÚNG → null của G2a/lưới SCA là phát hiện thật, không phải bug. Ngoại lệ #9 có chủ đích: E0 dùng log(GPR) LEVEL vì tái lập spec paper.
-- **docs/13 self-review + E1c** (2026-07-19): docs/13 BÁC ô chính E1b — định nghĩa episode (GPRD>q97.5) nội sinh với GPRD → ranking là tautology, không bằng chứng. `scripts/run_e1c_shock_detection.py` thay: sự kiện NGOẠI SINH (gold set) + **AUC** (bất biến đơn điệu → công bằng với JUMP/LEVEL). Bản endo (đối chứng) đã chạy: LEVEL thắng — đúng như docs/13 §2.5 dự đoán khi sự kiện nội sinh. **ô chính SCA-01 = UNRESOLVED** cho tới E1c-exo. Thêm LEVEL vào lưới (384 spec). Guard-P1 + governance §4.1-4.4 done. 6 test AUC.
+- **docs/13 self-review + E1c** (2026-07-19): thiết kế AUC + gold set giữ nguyên, nhưng bản endo cũ bị vô hiệu bởi bug `LEVEL+JUMP`. Phải chạy lại endo sau contract fix; exo vẫn chờ gold set. **ô chính SCA-01 = UNRESOLVED**.
 
 **⚠️ Nợ đường tới hạn (docs/13 §5.1 — đường găng MỚI):**
 - **`data/gold_events.csv`** chưa có → chặn E1c-exo → chặn chốt ô chính → chặn lưới. **KHÔNG phải việc code**: cần 2 người dựng tay, KHÔNG tra GPRD (docs/13 §2.2, cổng G-Gold). Claude tự dựng = vi phạm chính nguyên tắc ngoại sinh.
-- **Lưới SCA-01 `blockers=[gold_events_csv, E1c_exo, primary_cell_shock_resolved]`** — mọi blocker code khác đã gỡ (build_monthly_panel, E0, holdout g0).
+- **Lưới SCA-01 `blockers=[E1c_endo_rerun, gold_events_csv, E1c_exo, primary_cell_shock_resolved]`** — chưa được chạy.
 - Còn: protocol_commit docs/12 (chờ commit). Lỗi Romano-Wolf đã sửa; holdout đã ghi g0 §2 (tách track ngày/tháng).
 - **E0 replication harness** (Caldara-Iacoviello, docs/11 §5.8) — chặn lưới; docs/10 chưa liệt kê (nợ đồng bộ 10↔11).
 - **Entry SCA-01 vào registry** (docs/12 §10) + Guard-P1 test cho report generator.
@@ -91,9 +91,9 @@ Môi trường: `.venv/` ở repo root (layout WSL/Linux — interpreter là **`
 **Research runner tầng 2 (G2a, offline — không cần PostgreSQL):**
 
 ```bash
-.venv/bin/python scripts/run_tier2.py                            # shock=zscore LEVEL -> report tự đánh dấu INELIGIBLE (#9)
-.venv/bin/python scripts/run_tier2.py --shock-method innovation  # SHOCK HỢP LỆ (G2.0 xong) — dùng shocks.innovation
-.venv/bin/python scripts/run_tier2.py --refresh --horizon 20     # --refresh = kéo lại FRED, bỏ cache
+python scripts/run_tier2.py                            # mặc định shock=innovation hợp lệ
+python scripts/run_tier2.py --shock-method zscore      # LEVEL đối chứng -> report INELIGIBLE (#9)
+python scripts/run_tier2.py --refresh --horizon 20     # --refresh = kéo lại FRED, bỏ cache
 .venv/bin/python scripts/run_e1_diagnosis.py                     # E1: chẩn đoán spec shock quanh Hormuz 2026-02 (docs/11 §10)
 ```
 
@@ -135,7 +135,7 @@ Cước vận tải biển (docs/11 §5.3): `data_files.load_freight_monthly` (F
 - `dataset.py` — đường **production**, đọc `ext_series` từ PostgreSQL, point-in-time qua `load_series(..., as_of=...)`.
 - `data_files.py` — đường **research offline**, đọc file + FRED. Dùng lại đúng transform của `dataset.py` (`log1p_gpr`, `transform_global_macro`) — khác I/O, **không lặp lại quy ước biến đổi**. Thêm transform mới thì sửa ở `dataset.py`, không fork sang đây.
 
-Quy ước transform (docs/07 §0), sai là hỏng ước lượng: shock GPR vào hồi quy → **INNOVATION** (`shocks.innovation`, #9 — KHÔNG đưa level); z-score/log1p chỉ là LEVEL đối chứng (run_tier2 tự gắn INELIGIBLE khi dùng); Oil/DXY → `Δln`; VIX → giữ level; US10Y → sai phân. (log1p ép GPRD 370→5.9 làm phẳng spike — log1p chỉ dành country-GPR nước nhỏ, không cho GPRD daily.)
+Quy ước transform (docs/07 §0), sai là hỏng ước lượng: `LEVEL = log1p(GPR)` cho cả daily/monthly; shock chính là **INNOVATION = LEVEL − E[LEVEL|quá khứ]** (`shocks.innovation`, #9). `JUMP` tính trên chuỗi raw rolling để giữ thông tin đuôi; `LEVEL+JUMP := LEVEL + JUMP`, tuyệt đối không dùng `INNOVATION + JUMP`. Chế độ `--shock-method zscore|log1p` của `run_tier2` chỉ là LEVEL đối chứng và bị gắn INELIGIBLE. Oil/DXY → `Δln`; VIX → giữ level; US10Y → sai phân.
 
 Gate là **người quyết, không phải máy**: `run_tier2.gate_checklist` xuất verdict + mục Human review; run trên level tự gắn `INELIGIBLE` theo nguyên tắc #9.
 

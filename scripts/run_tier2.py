@@ -3,12 +3,12 @@
 🔬 Research runner (docs/05 G2a, gate theo docs/09 §2.5). KHONG service hoa.
 Doc GPR daily tu file + macro tu FRED (cache), uoc luong Local Projection tang 2, xuat:
   - docs/reports/G2a_<shock_type>_<data_version>.md   (KHONG bao gio ghi de)
-  - docs/reports/figs/irf_<macro>_<shock>_<shock_type>.png
+  - docs/reports/figs/irf_<macro>_<shock>_<shock_type>_<version_tag>.png
   - docs/reports/data/tier2_irf_<shock_type>_<data_version>.csv
 
 Chay:
-    python scripts/run_tier2.py                        # level (doi chung), cache
-    python scripts/run_tier2.py --shock-method innovation   # can G2.0 (docs/10 D2)
+    python scripts/run_tier2.py                        # innovation (mac dinh hop le), cache
+    python scripts/run_tier2.py --shock-method zscore  # LEVEL doi chung, INELIGIBLE
     python scripts/run_tier2.py --refresh --horizon 20
 
 Quy tac gate (sua theo review 08 §4.6): may KHONG tu phan GO/NO-GO — report co muc
@@ -144,16 +144,16 @@ def gate_checklist(irf: pd.DataFrame, shock: str, shock_type: str) -> tuple[str,
     return verdict, notes
 
 
-def irf_table_md(irf: pd.DataFrame, shock: str, macro_std: dict,
+def irf_table_md(irf: pd.DataFrame, shock: str, macro_std: dict, shock_std: dict,
                  horizons=(0, 1, 5, 10, 20, 30)) -> str:
     """Bang γ tai vai horizon chon loc, moi macro mot dong-block.
 
-    Them cot β_std = γ/std(macro) — vi shock da z-score (std=1), β_std la 'so do
-    lech chuan macro phan ung tren +1σ shock', SO SANH DUOC giua cac kenh. Tranh
-    hieu lam khi γ tho cua bien return (~0.0000) trong nhu loi.
+    β_std = γ * std(shock) / std(macro): so do lech chuan macro phan ung tren
+    +1σ shock, dung cho ca innovation chua standardize va LEVEL z-score.
     """
     lines = ["| Macro | h | γ (beta) | β_std (σ/σ) | SE | p-value | 90% CI |",
              "|---|---|---|---|---|---|---|"]
+    s_shock = shock_std.get(shock, 1.0)
     for M in MACRO:
         sd = macro_std.get(M, 1.0)
         for h in horizons:
@@ -163,7 +163,7 @@ def irf_table_md(irf: pd.DataFrame, shock: str, macro_std: dict,
                 continue
             r = row.iloc[0]
             star = "**" if r["pvalue"] < 0.10 else ""
-            bstd = r["beta"] / sd if sd else float("nan")
+            bstd = r["beta"] * s_shock / sd if sd else float("nan")
             lines.append(
                 f"| {MACRO_LABEL.get(M, M)} | {h} | {star}{r['beta']:.4f}{star} | "
                 f"{bstd:+.3f} | {r['se']:.4f} | {r['pvalue']:.3f} | "
@@ -180,6 +180,7 @@ def vix_robustness_md(panel: pd.DataFrame, macro_lags: int,
              "|---|---|" + "---|" * len(hs)]
     for name, (a, b) in VIX_SUBSAMPLES.items():
         sub = panel.loc[a:b]
+        shock_sd = sub["GPRD"].std() or 1.0
         irf = estimate_tier2(sub, macro_vars=["vix"], shocks=["GPRD"],
                              horizons=range(0, max(hs) + 1), macro_lags=macro_lags)
         cells = []
@@ -189,7 +190,7 @@ def vix_robustness_md(panel: pd.DataFrame, macro_lags: int,
                 cells.append("—"); continue
             rr = r.iloc[0]
             mark = "*" if rr["pvalue"] < 0.10 else ""
-            cells.append(f"{rr['beta'] / sd:+.3f}{mark}")
+            cells.append(f"{rr['beta'] * shock_sd / sd:+.3f}{mark}")
         lines.append(f"| {name} | {len(sub)} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
@@ -200,6 +201,7 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     shock_type = meta["shock_type"]
     verdict, notes = gate_checklist(irf, shock_primary, shock_type)
     macro_std = {M: float(panel[M].std()) for M in MACRO if M in panel.columns}
+    shock_std = {s: float(panel[s].std()) for s in DEFAULT_SHOCKS if s in panel.columns}
 
     parts = []
     parts.append(f"# G2a — Global Macro Impact (Tầng 2 cascade) — shock: {shock_type}\n")
@@ -249,21 +251,21 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     parts.append("- **Kết luận người review (GO/NO-GO + lý do + ngày + người):** _chưa điền_\n")
 
     parts.append(f"## Bảng IRF (γ) — shock `{shock_primary}`\n")
-    parts.append("γ = impulse response: phản ứng biến vĩ mô tại h ngày sau shock "
-                 "**+1 độ lệch chuẩn** GPRD (chuẩn hóa, không log1p — xem ghi chú "
-                 "biến đổi). **β_std** = γ/std(macro) → 'số σ macro phản ứng trên 1σ "
+    parts.append("γ = impulse response trên **1 đơn vị shock theo thang gốc**. "
+                 "**β_std** = γ×std(shock)/std(macro) → 'số σ macro phản ứng trên 1σ "
                  "shock', so sánh được giữa các kênh (β_std≈0 cho DXY/oil là thật, "
                  "không phải lỗi). **In đậm** = p<0.10.\n")
-    parts.append(irf_table_md(irf, shock_primary, macro_std))
+    parts.append(irf_table_md(irf, shock_primary, macro_std, shock_std))
     parts.append("")
 
     parts.append("## Đồ thị IRF\n")
     for M in MACRO:
         parts.append(f"### {MACRO_LABEL.get(M, M)}\n")
-        parts.append(f"![IRF {M}](figs/irf_{M}_{shock_primary}_{shock_type}.png)\n")
+        parts.append(
+            f"![IRF {M}](figs/irf_{M}_{shock_primary}_{shock_type}_{meta['version_tag']}.png)\n")
 
     parts.append("## KĐ3 — Threat vs Act (β_std theo nhiều horizon)\n")
-    parts.append("β_std = γ/std(macro) cho GPRD_THREAT vs GPRD_ACT — act có **mạnh & "
+    parts.append("β_std = γ×std(shock)/std(macro) cho GPRD_THREAT vs GPRD_ACT — act có **mạnh & "
                  "trễ hơn** threat không? Câu hỏi global thuần túy. `*` = p<0.10.\n")
     parts.append("| Macro | shock | h=0 | h=1 | h=5 | h=10 | h=20 |")
     parts.append("|---|---|---|---|---|---|---|")
@@ -271,6 +273,7 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     for M in MACRO:
         sd = macro_std.get(M, 1.0) or 1.0
         for sh in ("GPRD_THREAT", "GPRD_ACT"):
+            sh_sd = shock_std.get(sh, 1.0)
             cells = []
             for h in ta_horizons:
                 r = irf[(irf["macro_var"] == M) & (irf["shock"] == sh)
@@ -279,7 +282,7 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
                     cells.append("—"); continue
                 rr = r.iloc[0]
                 mark = "*" if rr["pvalue"] < 0.10 else ""
-                cells.append(f"{rr['beta'] / sd:+.3f}{mark}")
+                cells.append(f"{rr['beta'] * sh_sd / sd:+.3f}{mark}")
             parts.append(f"| {MACRO_LABEL.get(M, M)} | {sh.replace('GPRD_', '')} | "
                          + " | ".join(cells) + " |")
     parts.append("")
@@ -292,14 +295,13 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     parts.append("")
 
     parts.append("## Ghi chú biến đổi & nhận diện (đọc kỹ)\n")
-    parts.append(f"- **Transform shock**: `{meta['shock_method']}`. Với level: z-score "
-                 "giữ biên độ spike (log1p ép 370→5.9 — chỉ dành cho country-GPR "
-                 "nước nhỏ, docs/07v2 §0). Với innovation (G2.0): shock đã là phần "
-                 "residual, đọc γ là 'phản ứng / 1 đơn vị tin mới'.")
-    parts.append("- **Panel lưới business-day liên tục + complete-case một lần** "
-                 "(data_files.build_tier2_panel): tránh lỗi trước đây khi NaN rải rác "
-                 "khiến mỗi horizon chạy trên mẫu khác nhau và AR-lag nhảy qua khe NaN "
-                 "(gây γ VIX âm giả). Nay mọi horizon dùng cùng mẫu.")
+    parts.append(f"- **Transform shock**: `{meta['shock_method']}`. Contract: "
+                 "LEVEL=log1p(GPR), INNOVATION=LEVEL−E[LEVEL|quá khứ]; JUMP tính "
+                 "rolling trên raw để giữ thông tin đuôi. zscore/log1p trực tiếp chỉ "
+                 "là LEVEL đối chứng.")
+    parts.append("- **Information time + phiên thật**: GPR ngày D chỉ dùng từ D+1; "
+                 "tin cuối tuần gộp vào phiên kế tiếp. Panel chỉ giữ ngày cả bốn macro "
+                 "có quan sát, không forward-fill return/difference qua holiday.")
     parts.append("- **DXY nối dài**: DTWEXM (major, 1973→2019) nối DTWEXBGS (broad, "
                  "2006→) ở cấp return Δln (overlap 2006–2019 corr=0.926). Nhờ vậy có "
                  "đủ 4 kênh macro 1990+ thay vì chỉ 2006+ (broad-only).\n")
@@ -334,9 +336,9 @@ def main() -> None:
     ap.add_argument("--horizon", type=int, default=30, help="max horizon (ngày)")
     ap.add_argument("--macro-lags", type=int, default=5,
                     help="số lag ρ của chính M (VIX rất dai, cần ≥5)")
-    ap.add_argument("--shock-method", default="zscore",
+    ap.add_argument("--shock-method", default="innovation",
                     choices=list(SHOCK_METHOD_TO_TYPE),
-                    help="transform shock; 'innovation' cần G2.0 (shocks.py)")
+                    help="mac dinh innovation; zscore/log1p chi la LEVEL doi chung")
     ap.add_argument("--refresh", action="store_true", help="keo lai FRED (bo cache)")
     args = ap.parse_args()
 
