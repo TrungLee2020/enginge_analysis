@@ -79,8 +79,15 @@ def test_every_hypothesis_well_formed():
 
 
 def test_shocks_are_innovation_based():
-    """Mọi shock đăng ký là innovation/surprise — không level thô (nguyên tắc #9)."""
+    """Shock hồi quy phải là innovation/surprise — không level thô (nguyên tắc #9).
+
+    NGOẠI LỆ measurement: KĐ có claim_ceiling bắt đầu 'measurement' chỉ ĐO thuộc
+    tính thước đo (AUC phát hiện, KHÔNG hồi quy outcome) — LEVEL hợp lệ ở đó
+    (docs/13 §2.4). #9 áp cho shock ĐƯA VÀO HỒI QUY, không cho diagnostic mô tả.
+    """
     for h in _cfg()["hypotheses"]:
+        if str(h.get("claim_ceiling", "")).startswith("measurement"):
+            continue
         shocks = h["shock"] if isinstance(h["shock"], list) else [h["shock"]]
         for s in shocks:
             # LEVEL+JUMP là thước đo composite HỢP LỆ (docs/12 §2.1): level CỘNG jump

@@ -139,14 +139,42 @@ hypotheses:
     note: >
       Diagnostic, KHÔNG chạm holdout. E1 (1 episode Hormuz) đã gợi ý JUMP; E1b
       xác nhận trên toàn mẫu. Không đo trên outcome để không leak vào lưới SCA sau.
+    superseded_by: KĐ-E1c
+    superseded_reason: >
+      docs/13 §1: định nghĩa episode (GPRD>q97.5) NỘI SINH với GPRD → ranking phần
+      lớn do cấu tạo (LEVEL cao theo định nghĩa ở ngày GPRD cao; INNOVATION cố ý
+      không đơn điệu). Ngưỡng 2σ (§1.2) không so được JUMP zero-inflated vs LEVEL
+      skew. KĐ-E1c thay: sự kiện NGOẠI SINH (gold set) + AUC. ô chính LEVEL+JUMP
+      KHÔNG được dùng cho tới khi E1c-exo xác nhận.
+
+  - id: KĐ-E1c
+    statement: >
+      Thước đo shock nào phát hiện đúng cú sốc địa chính trị lớn khi tập sự kiện
+      xác định ĐỘC LẬP với GPRD (gold set ngoại sinh)? Đo bằng AUC (Mann-Whitney,
+      bất biến biến đổi đơn điệu → miễn nhiễm zero-inflation JUMP + skew LEVEL).
+      Thước đo: INNOVATION, JUMP, LEVEL+JUMP, LEVEL. Quyết định primary_cell.shock.
+    source: "docs/13 §2"
+    data: "GPRD daily 1990+; sự kiện = data/gold_events.csv (2 người dựng tay, KHÔNG tra GPRD)"
+    shock: [GPRD_INNOV, GPRD_JUMP, "GPRD_LEVEL+JUMP", GPRD_LEVEL]
+    method: "AUC Mann-Whitney event vs control; bootstrap CI phân tầng năm B=2000; endo+exo (self-refute §2.5)"
+    outcome: "Không có outcome macro — thuộc tính nội tại thước đo"
+    decides_gate: "SCA-01 primary_cell.shock"
+    claim_ceiling: "measurement"
+    registered: "2026-07-19"
+    status: registered      # exo chưa chạy được — chặn bởi gold set (G-Gold)
+    note: >
+      Bản ENDO (đối chứng) đã chạy: rank AUC LEVEL > LEVEL+JUMP > JUMP > INNOVATION
+      — LEVEL thắng đúng như §2.5 dự đoán khi sự kiện nội sinh (xác nhận chẩn đoán
+      §1.1). Bản EXO (bản DÙNG) chặn bởi data/gold_events.csv (chưa có). KHÔNG chốt
+      ô chính từ endo. AR order/shocks giống KĐ-E1b, LEVEL là ngoại lệ measurement
+      (không phải shock hồi quy nên #9 không áp).
 
 # ---------------------------------------------------------------------------
-# SPECIFICATION CURVE (docs/12) — entry đơn cho toàn lưới 288 spec
+# SPECIFICATION CURVE (docs/12) — entry đơn cho lưới 384 spec (SHOCK 4 mức)
 # ---------------------------------------------------------------------------
-# ⚠️ CHƯA ĐỦ ĐIỀU KIỆN CHẠY. protocol_commit chờ commit docs/12. Checklist docs/12
-# §9 còn thiếu: build_monthly_panel, E0 replication, quyết định holdout A/B/C ghi
-# g0. Entry này ghi TRƯỚC (ô chính đã chốt bởi E1b) nhưng lưới KHÔNG chạy cho tới
-# khi checklist xong.
+# ⚠️ CHƯA ĐỦ ĐIỀU KIỆN CHẠY. protocol_commit chờ commit docs/12. Checklist docs/13 §6
+# còn thiếu: gold_events.csv → E1c-exo → chốt primary_cell.shock. Entry ghi TRƯỚC
+# nhưng lưới KHÔNG chạy cho tới khi các cổng G-Gold/G-E1c/G-Primary/G-Gov đầy đủ.
 specification_curves:
   - id: SCA-01
     registered_at: 2026-07-19
@@ -155,9 +183,10 @@ specification_curves:
     type: specification_curve
     statement: >
       Tác động của cú sốc địa chính trị lên kết quả vĩ mô khác 0, kiểm định chung
-      trên toàn bộ tập spec hợp lệ (6 chiều, ~288 spec sau khi loại trùng).
+      trên toàn bộ tập spec hợp lệ (6 chiều, 384 spec sau khi thêm LEVEL, docs/13 §4.2).
     primary_cell:
-      shock: "LEVEL+JUMP"        # chốt bởi E1b (KĐ-E1b): winner toàn mẫu + mọi sub-sample
+      shock: UNRESOLVED         # E1b LEVEL+JUMP BỊ BÁC (docs/13 §1 — episode nội sinh).
+                                # Chốt sau E1c-exo (KĐ-E1c) hoặc để MỞ (docs/13 §3.1: 4 mức, Holm 4×H).
       freq_outcome: monthly_real_macro
       funcform: quantile_tau_0.10
       channel: act_threat_split
@@ -173,10 +202,11 @@ specification_curves:
       method: lag_augmented_LP
       se: white
       bands: sup_t_simultaneous
+    shock_dimension: [INNOVATION, JUMP, "LEVEL+JUMP", LEVEL]   # +LEVEL sau E0 PASS (docs/13 §4.2)
     status: registered_not_run
-    # build_monthly_panel DONE 2026-07-19. E0 replication PASS 2026-07-19 (C-I 2022
-    # tái lập: GPR→IP giảm h=1,2 p<0.10; report E0_replication_CI2022_*.md).
-    blockers: [holdout_decision_g0]   # còn DUY NHẤT: user quyết A/B/C ghi g0 (docs/11 §9)
+    # DONE: build_monthly_panel, E0 replication PASS, holdout ghi g0 §2 (tách track ngày/tháng).
+    # docs/13 phát hiện E1b bị bác → cổng mới G-Gold/G-E1c/G-Primary trước khi chạy.
+    blockers: [gold_events_csv, E1c_exo, primary_cell_shock_resolved]
     commitment: >
       Báo cáo TOÀN BỘ đường cong bất kể kết quả. Không ô nào bị loại khỏi report
       sau khi đã chạy. Không chạm holdout.

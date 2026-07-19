@@ -30,13 +30,45 @@ Bậc tự do mà `docs/10` §5 cảnh báo mạnh nhất: order `p` của AR tr
 
 ---
 
-## 2. Holdout policy — final holdout chạm đúng 1 lần
+## 2. Holdout policy — TÁCH THEO TRACK (quyết định 2026-07-19, docs/13 §4.1)
 
-**Khóa cứng:** `config/backtest.yaml` split 4 tầng + `tests/test_config_locked.py`.
+**Khóa cứng nền:** `config/backtest.yaml` split 4 tầng + `tests/test_config_locked.py`.
+Development 2015–2020 / Validation 2021–2023 / Pseudo-OOS 2024–2025 / Final holdout 2026-H1.
 
-- Development 2015–2020 (tự do thử) / Validation 2021–2023 (chọn model/feature) / Pseudo-OOS 2024–2025 (walk-forward) / **Final holdout 2026-H1 — chạm ĐÚNG 1 LẦN**.
-- Ai được chạm final holdout: chỉ sau khi MỌI quyết định model đã chốt trên development+validation. Sau khi chạm: **KHÔNG sửa model theo kết quả**. Kết quả xấu = báo cáo kết quả xấu (CLAUDE.md #3).
-- Ghi log: đặt `final_holdout_touched: true` + `final_holdout_touched_commit: <hash>` trong cùng commit chạm. Test khóa enforce: `touched=true` phải kèm commit.
+**Vấn đề số học buộc phải tách track (không phải chọn A/B/C tùy ý):** tại horizon `h`,
+cú sốc cuối dùng được = (ngày cuối dữ liệu − h). Dữ liệu kết thúc ~2026-06:
+
+| Track / horizon | 2026-H1 cho ra bao nhiêu quan sát dùng được |
+|---|---|
+| Ngày, h=30 | ~95 phiên — **dùng được** |
+| Tháng, h=1 | ~5 tháng |
+| Tháng, h=6 | **0** |
+| Tháng, h=0..24 (ô chính SCA) | **0 — holdout RỖNG theo cấu tạo** |
+
+A/B/C (giữ / dời / tách theo regime) đều giả định holdout là lát cắt thời gian tranh
+luận được về *chất lượng*. Với track tháng vấn đề không phải chất lượng — là **không tồn tại**.
+
+**Chính sách chốt:**
+
+| Track | Chính sách | Lý do |
+|---|---|---|
+| **Ngày** | GIỮ `final_holdout: 2026-01-01…2026-06-30`, chạm ĐÚNG 1 LẦN, báo cáo kèm cảnh báo chế độ đơn lẻ (Hormuz) | ~95 quan sát dùng được; giả thuyết đang test là giả thuyết ĐUÔI → cửa sổ chứa sự kiện đuôi lớn nhất lịch sử là ĐÚNG loại dữ liệu |
+| **Tháng** | **CHƯA CÓ holdout.** Pseudo-OOS 2024–2025 là trần bằng chứng. `claim_ceiling = predictive, chưa xác nhận holdout`. Hoãn final holdout tới ~2028-H2 (đủ ~24 tháng hậu 2026) | Holdout tháng rỗng theo cấu tạo (bảng trên) |
+
+**KHÔNG dời holdout sang 2026-H2** (B/C cũ): ở đó (a) không có sự kiện đuôi để test giả
+thuyết đuôi, (b) `jump()` dùng q95 rolling 250 phiên → JUMP bị nén cơ học đúng khoảng đó.
+Test giả thuyết đuôi trên mẫu không đuôi bằng thước đo đang bị bóp = phí lần chạm duy nhất.
+
+**Trần claim thấp hơn cho track tháng — chấp nhận được, phải GHI RA:** sản phẩm phân phối
++ đo lường chỉ cần pseudo-OOS + tính bền qua specification curve + danh sách episode kiểm
+chứng được. Bằng chứng cấp holdout chỉ use case tín hiệu giao dịch cần — mà docs/11 §13.3
+đề nghị bỏ. Trần thấp hơn không hỏng sản phẩm; nó phải được ghi thay vì ngầm hiểu.
+
+- Chạm holdout NGÀY: đặt `final_holdout_touched: true` + commit trong cùng commit chạm.
+  Test khóa enforce. Sau khi chạm: KHÔNG sửa model theo kết quả (CLAUDE.md #3).
+- Holdout theo episode: KHÔNG dùng — chọn episode nào giữ là bậc tự do mới không khóa chặt
+  đủ; sự kiện đuôi quá hiếm để holdout nào có power. Ghi thẳng điều này thay vì dựng cơ chế
+  trông nghiêm ngặt mà không xác nhận được gì.
 
 ---
 

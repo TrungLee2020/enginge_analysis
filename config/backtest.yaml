@@ -1,5 +1,13 @@
 # backtest.yaml — CẤU HÌNH KHÓA CỨNG
 #
+# ⚠️ TRẠNG THÁI NGỦ ĐÔNG (2026-07-19, docs/13 §4.4): phần dưới cấu hình cho use case
+# TÍN HIỆU GIAO DỊCH / ALPHA (`metrics_horizons_days`, `gates` G3, deflated_sharpe,
+# hansen_spa, `benchmarks`). docs/11 §13.3 đề nghị BỎ tín hiệu giao dịch khỏi lộ trình
+# → các trường đó hiện KHÔNG dùng. NHƯNG: khối `split` 4 tầng + `walk_forward` (purge/
+# embargo) VẪN CÒN HIỆU LỰC cho track econometrics (dev/val/pseudo-OOS chọn spec, AR
+# order, hypothesis registry). Đừng tưởng G3 đang chờ — nó đang ngủ đông. Holdout theo
+# track: xem `g0_governance.md` §2 (ngày giữ 2026-H1; tháng chưa có holdout).
+#
 # LỊCH SỬ: bản v1 dùng `oos_start: 2023-01-01` làm khóa duy nhất. Review `docs/08` §4.8 chỉ ra
 # một cửa sổ OOS đơn không đủ: nếu cùng cửa sổ đó vừa dùng chọn feature, chọn chân B/C, sửa
 # rubric, chọn model, thì nó đã thành in-sample trên thực tế. Thay bằng split 4 tầng

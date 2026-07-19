@@ -21,7 +21,7 @@ import pandas as pd
 
 from ..ingest.gpr_daily import SERIES as GPR_DAILY_SERIES
 from ..ingest.market_data import FRED_MAP
-from .dataset import log1p_gpr, transform_global_macro
+from .dataset import dlog, log1p_gpr, transform_global_macro
 
 DEFAULT_GPR_DAILY = "data/data_gpr_daily_recent.xls"
 DEFAULT_CACHE_DIR = "data/cache"
@@ -263,6 +263,46 @@ def load_gpr_monthly(path: str = DEFAULT_GPR_MONTHLY) -> pd.DataFrame:
     return out.set_index("month").sort_index()
 
 
+# Cước vận tải biển (docs/11 §5.3) — PPI deep sea freight transportation, FRED.
+# Phủ 1990+ monthly (đủ mẫu). Điểm nghẽn Hormuz/Malacca không nằm trong 4 kênh
+# Oil/DXY/VIX/US10Y; Malacca là cửa ngõ thương mại VN → biến generic nhưng nước
+# xuất khẩu châu Á nhạy hơn. Là CHỈ SỐ GIÁ monthly → Δln.
+FRED_FREIGHT = "PCU483111483111"
+
+
+def transform_freight(raw: pd.Series) -> pd.Series:
+    """Freight PPI (mức giá) -> Δln (log-return), giữ tên 'freight'."""
+    return dlog(raw).rename("freight")
+
+
+def load_freight_monthly(
+    start: str = "1990-01-01",
+    end: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    refresh: bool = False,
+) -> pd.Series:
+    """Freight PPI THÔ (mức giá) monthly từ FRED, cache CSV. Chưa transform.
+
+    Trả Series 'freight' index=đầu tháng. build_monthly_panel gọi transform_freight.
+    """
+    cache = Path(cache_dir) / "freight_raw.csv"
+    if cache.exists() and not refresh:
+        s = pd.read_csv(cache, parse_dates=["date"]).set_index("date")["freight"]
+        return s.sort_index()
+
+    from pandas_datareader import data as pdr
+
+    end = end or dt.date.today().isoformat()
+    s = pdr.DataReader(FRED_FREIGHT, "fred", start, end)[FRED_FREIGHT]
+    s = s.rename("freight")
+    s.index.name = "date"
+    s = s.resample("MS").last().sort_index()
+
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    s.to_frame().to_csv(cache)
+    return s
+
+
 def load_macro_monthly(
     start: str = "1985-01-01",
     end: str | None = None,
@@ -296,6 +336,7 @@ def build_monthly_panel(
     min_train: int = 60,
     max_order: int = 5,
     extra_monthly: pd.DataFrame | None = None,
+    freight: bool = False,
 ) -> pd.DataFrame:
     """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_VNM⊥ + macro.
 
@@ -307,6 +348,9 @@ def build_monthly_panel(
                                  GPR global (bo phan chung) roi innovation. KHONG
                                  lo GPRC_VNM tho (#9).
       - macro_vars (oil/dxy/vix/us10y) tong hop ve thang.
+      - freight=True: them cot `freight` (Δln PPI deep sea freight, docs/11 §5.3) —
+        kenh vat ly Hormuz/Malacca ngoai 4 kenh tai chinh. Mac dinh False de khong
+        pha panel cu.
       - extra_monthly: outcome vi mo thuc (IP/CPI...) neu E3 cung cap — join theo thang.
 
     Innovation monthly: AR(p) rolling, p chon BIC/dev-window (giong daily, nhung
@@ -337,6 +381,9 @@ def build_monthly_panel(
     macro = macro[cols]
 
     frames = [macro, gpr_innov, vnm_orth_innov]
+    if freight:
+        fr_raw = load_freight_monthly(start, end, cache_dir, refresh)
+        frames.append(transform_freight(fr_raw))
     if extra_monthly is not None:
         frames.append(extra_monthly)
     panel = frames[0].to_frame() if isinstance(frames[0], pd.Series) else frames[0]
