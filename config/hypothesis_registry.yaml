@@ -114,6 +114,73 @@ hypotheses:
     registered: "2026-07-18"
     status: registered
 
+  - id: KĐ-E1b
+    statement: >
+      Trong ba thước đo shock {INNOVATION, JUMP, LEVEL+JUMP}, thước đo nào PHÁT
+      HIỆN các cú sốc địa chính trị lớn đã biết (event study descriptor) tốt nhất
+      trên toàn mẫu 1990+, đo bằng: (a) độ nổi bật của thước đo tại các episode
+      lớn so với nền, (b) tỉ lệ episode lớn được thước đo highlight, (c) tính ổn
+      định của ranking qua sub-sample. Quyết định trường SHOCK của ô chính docs/12.
+    source: "docs/11 §10 E1b; docs/12 §2.2 (ô chính) §9 (checklist)"
+    data: "GPRD/GPRD_ACT/GPRD_THREAT daily 1990+; danh sách episode lớn = GPRD vượt phân vị 97.5 rolling, dedup cụm"
+    shock: [GPRD_INNOV, GPRD_JUMP, "GPRD_LEVEL+JUMP"]
+    method: "Event-study descriptor (KHÔNG hồi quy outcome — tránh circular với tầng 2); rank + σ; sub-sample robustness"
+    outcome: "Không có outcome macro — đo thuộc tính nội tại của thước đo shock"
+    decides_gate: "SCA-01 primary_cell.shock"
+    claim_ceiling: "measurement (mô tả thuộc tính thước đo, không claim tác động)"
+    registered: "2026-07-19"
+    status: tested
+    report: "docs/reports/E1b_shock_ranking_8cc9bfb5c3b6.md"
+    result: >
+      Ranking (hit rate phát hiện episode, full sample): LEVEL+JUMP (68.7%) >
+      JUMP (55.4%) > INNOVATION (32.5%). Winner LEVEL+JUMP đứng đầu ở MỌI
+      sub-sample (pre-2008/2008-2015/post-2015). INNOVATION kém nhất — xác nhận
+      E1 trên toàn 166 episode, không chỉ Hormuz. → ô chính SCA-01 dùng LEVEL+JUMP.
+    note: >
+      Diagnostic, KHÔNG chạm holdout. E1 (1 episode Hormuz) đã gợi ý JUMP; E1b
+      xác nhận trên toàn mẫu. Không đo trên outcome để không leak vào lưới SCA sau.
+
+# ---------------------------------------------------------------------------
+# SPECIFICATION CURVE (docs/12) — entry đơn cho toàn lưới 288 spec
+# ---------------------------------------------------------------------------
+# ⚠️ CHƯA ĐỦ ĐIỀU KIỆN CHẠY. protocol_commit chờ commit docs/12. Checklist docs/12
+# §9 còn thiếu: build_monthly_panel, E0 replication, quyết định holdout A/B/C ghi
+# g0. Entry này ghi TRƯỚC (ô chính đã chốt bởi E1b) nhưng lưới KHÔNG chạy cho tới
+# khi checklist xong.
+specification_curves:
+  - id: SCA-01
+    registered_at: 2026-07-19
+    protocol_doc: docs/12_specification_curve_protocol.md
+    protocol_commit: "<điền commit hash docs/12 khi commit>"
+    type: specification_curve
+    statement: >
+      Tác động của cú sốc địa chính trị lên kết quả vĩ mô khác 0, kiểm định chung
+      trên toàn bộ tập spec hợp lệ (6 chiều, ~288 spec sau khi loại trùng).
+    primary_cell:
+      shock: "LEVEL+JUMP"        # chốt bởi E1b (KĐ-E1b): winner toàn mẫu + mọi sub-sample
+      freq_outcome: monthly_real_macro
+      funcform: quantile_tau_0.10
+      channel: act_threat_split
+      jump_thresh: q95
+      sample: full
+    test_statistics: [median_effect, share_significant, stouffer_z]
+    null_distribution:
+      method: moving_block_bootstrap_under_null
+      B: 1000
+      block_length_monthly: 12
+      block_length_daily: 60
+    lp_inference:
+      method: lag_augmented_LP
+      se: white
+      bands: sup_t_simultaneous
+    status: registered_not_run
+    # build_monthly_panel DONE 2026-07-19. E0 replication PASS 2026-07-19 (C-I 2022
+    # tái lập: GPR→IP giảm h=1,2 p<0.10; report E0_replication_CI2022_*.md).
+    blockers: [holdout_decision_g0]   # còn DUY NHẤT: user quyết A/B/C ghi g0 (docs/11 §9)
+    commitment: >
+      Báo cáo TOÀN BỘ đường cong bất kể kết quả. Không ô nào bị loại khỏi report
+      sau khi đã chạy. Không chạm holdout.
+
 # ---------------------------------------------------------------------------
 # ĐẾM SỐ LẦN THỬ (multiple-testing / Deflated Sharpe — docs/09 §2.7)
 # ---------------------------------------------------------------------------

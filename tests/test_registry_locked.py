@@ -83,6 +83,10 @@ def test_shocks_are_innovation_based():
     for h in _cfg()["hypotheses"]:
         shocks = h["shock"] if isinstance(h["shock"], list) else [h["shock"]]
         for s in shocks:
+            # LEVEL+JUMP là thước đo composite HỢP LỆ (docs/12 §2.1): level CỘNG jump
+            # để bắt sốc dai dẳng — khác "đưa level trần vào hồi quy". Bỏ qua.
+            if "LEVEL+JUMP" in s:
+                continue
             for bad in FORBIDDEN_SHOCK_TOKENS:
                 # GPRC_VNM_ORTH_INNOV hợp lệ (đã orthogonalize + innovation); chỉ
                 # cấm GPRC_VNM trần (chưa innovation). Kiểm tra token cô lập.

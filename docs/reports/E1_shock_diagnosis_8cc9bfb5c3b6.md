@@ -5,8 +5,8 @@
 ## Metadata
 
 - **data_version** (sha256 GPRD daily): `8cc9bfb5c3b6`
-- **git commit**: `dc4c2b2`
-- **generated_at**: 2026-07-18T15:38:32
+- **git commit**: `541d60f`
+- **generated_at**: 2026-07-19T01:12:13
 - **AR order (pre-registered, BIC/dev-window)**: p=5
 - **cửa sổ**: 2026-02-01 → 2026-06-30
 
@@ -22,7 +22,7 @@ Cú sốc dầu địa chính trị lớn nhất chuỗi 1985+ (Mỹ/Israel khô
 | INNOVATION | 1.07 | 99.8 |
 | JUMP | 6.032 | **99.9** |
 
-**Biên độ bị nén:** INNOVATION đỉnh = 1.07, trong khi trung bình INNOVATION tuần TRƯỚC sốc (23–27/02) đã là 0.386. Cú sốc lịch sử chỉ cho innovation gấp ~1.8× một ngày thường — vì chuỗi GPRD tăng dần (139→197→138→167→197) trước cú nhảy nên AR(5) đã học nền cao (PERSISTENT leo 4.47→5.04), coi phần lớn cú sốc là 'đã dự báo được'. JUMP giữ nguyên biên độ thật (6.032, percentile 99.9).
+**Biên độ bị nén:** INNOVATION đỉnh = 1.07, trong khi trung bình INNOVATION tuần TRƯỚC sốc (23–27/02) đã là 0.386. Cú sốc lịch sử chỉ cho innovation gấp 2.77× một ngày thường — vì chuỗi GPRD tăng dần (139→197→138→167→197) trước cú nhảy nên AR(5) đã học nền cao (PERSISTENT leo 4.47→5.04), coi phần lớn cú sốc là 'đã dự báo được'. JUMP giữ nguyên biên độ thật (6.032, percentile 99.9).
 
 ## Chẩn đoán (bảng E1 docs/11)
 

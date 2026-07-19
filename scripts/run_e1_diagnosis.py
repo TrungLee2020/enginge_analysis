@@ -90,6 +90,9 @@ def main() -> None:
         # so sánh biên độ: innovation đỉnh so với 1 ngày "thường" trong tuần trước sốc
         "innov_typical_preshock": round(float(innov.loc["2026-02-23":"2026-02-27"].mean()), 3),
     }
+    # Tỉ lệ nén: đỉnh / ngày thường. TÍNH từ payload — không hard-code (Guard P1).
+    stats["innov_peak_ratio"] = round(
+        stats["innov_peak"] / stats["innov_typical_preshock"], 2)
 
     # --- Vẽ ---
     FIGS.mkdir(parents=True, exist_ok=True)
@@ -150,10 +153,11 @@ def main() -> None:
         f"| JUMP | {stats['jump_peak']} | **{stats['jump_pct']}** |\n",
         f"**Biên độ bị nén:** INNOVATION đỉnh = {stats['innov_peak']}, trong khi trung "
         f"bình INNOVATION tuần TRƯỚC sốc (23–27/02) đã là {stats['innov_typical_preshock']}. "
-        "Cú sốc lịch sử chỉ cho innovation gấp ~1.8× một ngày thường — vì chuỗi GPRD "
-        "tăng dần (139→197→138→167→197) trước cú nhảy nên AR(5) đã học nền cao "
-        "(PERSISTENT leo 4.47→5.04), coi phần lớn cú sốc là 'đã dự báo được'. JUMP "
-        f"giữ nguyên biên độ thật ({stats['jump_peak']}, percentile {stats['jump_pct']}).\n",
+        f"Cú sốc lịch sử chỉ cho innovation gấp {stats['innov_peak_ratio']}× một ngày "
+        "thường — vì chuỗi GPRD tăng dần (139→197→138→167→197) trước cú nhảy nên AR(5) "
+        "đã học nền cao (PERSISTENT leo 4.47→5.04), coi phần lớn cú sốc là 'đã dự báo "
+        f"được'. JUMP giữ nguyên biên độ thật ({stats['jump_peak']}, percentile "
+        f"{stats['jump_pct']}).\n",
         "## Chẩn đoán (bảng E1 docs/11)\n",
         f"{verdict_row}\n",
         "Đồng thời giải thích bất thường γ(VIX) horizon dài của G2a: nếu shock chính "

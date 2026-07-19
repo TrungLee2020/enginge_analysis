@@ -237,3 +237,109 @@ def build_tier2_panel(
     panel = macro_g.join(gpr_g, how="inner").sort_index()
     # Complete-case 1 lan -> moi horizon dung cung mau, AR-lag khong vuot NaN.
     return panel.dropna()
+
+
+# ---------------------------------------------------------------------------
+# Track MONTHLY (docs/10 F3, docs/11 E3) — GPR global + GPRC_VNM, #10 no-ffill
+# ---------------------------------------------------------------------------
+DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202607.xls"
+
+
+def load_gpr_monthly(path: str = DEFAULT_GPR_MONTHLY) -> pd.DataFrame:
+    """Doc GPR (global monthly) + GPRC_VNM tu file monthly -> wide, index=dau thang.
+
+    Gia tri THO, chua transform. Guard cot GPRC_VNM (tranh nham vintage 39 nuoc).
+    """
+    df = pd.read_excel(path, sheet_name="Sheet1", header=0)
+    if "GPRC_VNM" not in df.columns:
+        raise ValueError(
+            "File monthly thieu GPRC_VNM — co the la vintage cu 39 nuoc historical-only.")
+    keep = ["month", "GPR", "GPRC_VNM"]
+    missing = [c for c in keep if c not in df.columns]
+    if missing:
+        raise ValueError(f"File monthly thieu cot: {missing}")
+    out = df[keep].copy()
+    out["month"] = pd.to_datetime(out["month"])
+    return out.set_index("month").sort_index()
+
+
+def load_macro_monthly(
+    start: str = "1985-01-01",
+    end: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    refresh: bool = False,
+    how: str = "last",
+) -> pd.DataFrame:
+    """Macro tai chinh {oil, dxy, vix, us10y} da transform, TONG HOP ve THANG.
+
+    Tai su dung load_macro_transformed (daily) roi resample MS. `how`:
+      - "last": gia tri cuoi thang (level-like: vix).
+      - Returns (oil/dxy: Δln) va diff (us10y) da la thay doi -> lay TONG trong thang
+        de giu y nghia "thay doi ca thang" (sum cua daily Δln = Δln thang).
+    Don gian & hop ly cho SCA freq_outcome=monthly; E3 co the tinh chinh sau.
+    """
+    daily = load_macro_transformed(start, end, cache_dir, refresh)
+    # oil/dxy/us10y la thay doi (return/diff) -> sum trong thang; vix la level -> last.
+    agg = {c: ("sum" if c in {"oil", "dxy", "us10y"} else "last")
+           for c in daily.columns}
+    monthly = daily.resample("MS").agg(agg)
+    return monthly
+
+
+def build_monthly_panel(
+    gpr_path: str = DEFAULT_GPR_MONTHLY,
+    start: str = "1990-01-01",
+    end: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    refresh: bool = False,
+    macro_vars: Iterable[str] = CORE_MACRO,
+    min_train: int = 60,
+    max_order: int = 5,
+    extra_monthly: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_VNM⊥ + macro.
+
+    Nguyen tac #10: KHONG forward-fill xuong daily. Grid la dau thang that.
+
+    Cot ra:
+      - `GPR_INNOV`            : β global-direct (GPR global monthly, innovation)
+      - `GPRC_VNM_ORTH_INNOV`  : λ domestic-direct — GPRC_VNM da ORTHOGONALIZE khoi
+                                 GPR global (bo phan chung) roi innovation. KHONG
+                                 lo GPRC_VNM tho (#9).
+      - macro_vars (oil/dxy/vix/us10y) tong hop ve thang.
+      - extra_monthly: outcome vi mo thuc (IP/CPI...) neu E3 cung cap — join theo thang.
+
+    Innovation monthly: AR(p) rolling, p chon BIC/dev-window (giong daily, nhung
+    min_train nho hon vi mau thang it). Complete-case 1 lan.
+    """
+    from .shocks import innovation
+    from .tier3_country import orthogonalize
+
+    gpr_m = load_gpr_monthly(gpr_path)                       # GPR, GPRC_VNM (tho)
+    gpr_m = gpr_m.loc[start:end] if end else gpr_m.loc[start:]
+
+    # GPR global -> innovation (β). log1p ap trong innovation(is_level=False).
+    gpr_innov = innovation(gpr_m["GPR"], min_train=min_train,
+                           max_order=max_order).rename("GPR_INNOV")
+
+    # GPRC_VNM: log1p -> orthogonalize khoi GPR global (level) -> innovation (λ).
+    #   Phan RIENG cua VN (⊥ global) moi la domestic-direct (docs/07v2 §4.1, #8).
+    lg = pd.DataFrame({
+        "vnm": log1p_gpr(gpr_m["GPRC_VNM"]),
+        "gpr": log1p_gpr(gpr_m["GPR"]),
+    }).dropna()
+    vnm_orth = orthogonalize(lg, target="vnm", on=["gpr"])   # residual = VN rieng
+    vnm_orth_innov = innovation(vnm_orth, is_level=True, min_train=min_train,
+                                max_order=max_order).rename("GPRC_VNM_ORTH_INNOV")
+
+    macro = load_macro_monthly(start, end, cache_dir, refresh)
+    cols = [c for c in macro_vars if c in macro.columns]
+    macro = macro[cols]
+
+    frames = [macro, gpr_innov, vnm_orth_innov]
+    if extra_monthly is not None:
+        frames.append(extra_monthly)
+    panel = frames[0].to_frame() if isinstance(frames[0], pd.Series) else frames[0]
+    for f in frames[1:]:
+        panel = panel.join(f, how="inner")
+    return panel.sort_index().dropna()
