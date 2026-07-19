@@ -101,7 +101,7 @@ r_{t+h} = α_h + Σ_j β_{j,h}·GPR_{j,t}          (shock nguồn: US, CN, RU, M
 ```
 - **Cấu trúc transmission (xem `docs/06`, `docs/07_formulas_reference_v2.md` §3–5):** phương trình này là **tầng 3** của cascade — `Σβ_j·GPR_j` là GLOBAL-DIRECT, `θ·(macro)` là INDIRECT (shock đã truyền qua tầng 2 global macro), `λ·VN-GPR⊥` là DOMESTIC-DIRECT. Tầng 2 (`γ_{M,j}`: GPR→Oil/DXY/VIX/US10Y) ước lượng riêng, generic. Tổng tác động phân rã bằng **tích chập** `Total^global_j(h) = β_j(h) + Σ_M Σ_{s=0..h} γ_{M,j}(s)·θ_M(h−s)` (KĐ12 — sửa 2026-07-16, không nhân hai hệ số cùng horizon). Mọi shock trong phương trình là **innovation** (CLAUDE.md #9).
 - Outcome: VN-Index excess return, VN30F1M, tỷ giá USD/VND, nhóm ngành xuất khẩu (dệt may, thủy sản, gỗ, điện tử) vs nhóm phòng thủ.
-- Xử lý weekend: gán trung bình GPR các ngày nghỉ vào ngày giao dịch kế tiếp (theo đúng cách paper AI-GPR xử lý với US market).
+- Xử lý weekend sau publish lag D+1: gán vào ngày giao dịch kế tiếp; dùng mean cho LEVEL/INNOVATION và max cho JUMP. `LEVEL+JUMP = mean(LEVEL) + max(JUMP)` để không làm mượt tail event cuối tuần.
 - Giả thuyết độ trễ phản ánh (leading indicator): global GPR spike tại t, báo VN phản ánh đầy đủ tại t+Δ (giờ→ngày). Nếu Δ > 0 đo được thì global GPR là tín hiệu dẫn trước cho phản ứng của retail VN (nhóm chủ yếu đọc tin tiếng Việt) — kiểm định chính thức tại C2-KĐ5.
 
 **Track vĩ mô (monthly/quarterly):**

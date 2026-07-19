@@ -94,3 +94,8 @@ def test_rank_orders_by_auc():
         "C": {"full": {"auc": 0.95}},
     }
     assert e1c.rank(table) == ["C", "A", "B"]
+
+
+def test_report_path_includes_data_version_and_commit():
+    out = e1c._report_path("deadbeef1234", "abc1234")
+    assert out.name == "E1c_shock_detection_deadbeef1234_abc1234.md"

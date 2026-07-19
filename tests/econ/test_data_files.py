@@ -15,6 +15,7 @@ import pytest
 from gpr_engine.econometrics import data_files as df_mod
 from gpr_engine.econometrics.data_files import (
     align_daily_gpr_to_information_time,
+    align_daily_shock_measures_to_information_time,
     build_tier2_panel,
     splice_dxy_returns,
     transform_gpr_shocks,
@@ -77,9 +78,10 @@ def test_build_tier2_panel_uses_observed_macro_days_and_is_complete(monkeypatch)
         df_mod, "load_macro_transformed",
         lambda *a, **k: macro)
 
-    panel = build_tier2_panel(
-        start="2020-01-01", end="2020-02-29", ffill_limit=3,
-        shock_method="zscore")
+    with pytest.warns(DeprecationWarning, match="ffill_limit"):
+        panel = build_tier2_panel(
+            start="2020-01-01", end="2020-02-29", ffill_limit=3,
+            shock_method="zscore")
 
     # 1) khong con NaN (complete-case)
     assert not panel.isna().any().any()
@@ -102,7 +104,38 @@ def test_daily_gpr_is_available_d_plus_one_and_weekend_rolls_forward():
     gpr = pd.DataFrame({"GPRD": [3.0, 5.0, 7.0, 11.0]}, index=idx)
     decisions = pd.DatetimeIndex(["2020-01-06", "2020-01-07"])
 
-    out = align_daily_gpr_to_information_time(gpr, decisions, publish_lag_days=1)
+    out = align_daily_gpr_to_information_time(
+        gpr, decisions, publish_lag_days=1, aggregation="mean")
 
     assert out.loc[pd.Timestamp("2020-01-06"), "GPRD"] == pytest.approx(5.0)
     assert out.loc[pd.Timestamp("2020-01-07"), "GPRD"] == pytest.approx(11.0)
+
+
+def test_daily_alignment_requires_explicit_aggregation():
+    gpr = pd.DataFrame(
+        {"GPRD": [1.0]}, index=pd.DatetimeIndex(["2020-01-03"]))
+    with pytest.raises(ValueError, match="aggregation"):
+        align_daily_gpr_to_information_time(
+            gpr, pd.DatetimeIndex(["2020-01-06"]), publish_lag_days=1)
+
+
+def test_daily_shock_alignment_uses_mean_level_and_max_jump():
+    """Composite duoc ghep sau aggregation, nen spike cuoi tuan khong bi pha loang."""
+    idx = pd.date_range("2020-01-03", "2020-01-05", freq="D")  # Fri..Sun
+    measures = pd.DataFrame({
+        "GPRD_LEVEL": [3.0, 5.0, 7.0],
+        "GPRD_INNOV": [-1.0, 2.0, 1.0],
+        "GPRD_JUMP": [0.0, 9.0, 0.0],
+        "GPRD_LEVEL_PLUS_JUMP": [3.0, 14.0, 7.0],
+    }, index=idx)
+
+    out = align_daily_shock_measures_to_information_time(
+        measures,
+        pd.DatetimeIndex(["2020-01-06"]),
+        publish_lag_days=1,
+    )
+
+    assert out.loc["2020-01-06", "GPRD_LEVEL"] == pytest.approx(5.0)
+    assert out.loc["2020-01-06", "GPRD_INNOV"] == pytest.approx(2 / 3)
+    assert out.loc["2020-01-06", "GPRD_JUMP"] == pytest.approx(9.0)
+    assert out.loc["2020-01-06", "GPRD_LEVEL_PLUS_JUMP"] == pytest.approx(14.0)

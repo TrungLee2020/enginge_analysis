@@ -22,6 +22,14 @@ REGISTRY = Path(__file__).resolve().parents[1] / "config" / "hypothesis_registry
 LOCKED_AR_ORDERS = {"GPRD": 5, "GPRD_ACT": 5, "GPRD_THREAT": 2}
 LOCKED_DEV_WINDOW = ["2015-01-01", "2020-12-31"]
 LOCKED_MAX_ORDER = 5
+LOCKED_MONTHLY_FOCAL_HORIZONS = [1, 2, 6]
+LOCKED_DAILY_FOCAL_HORIZONS = [5, 20, 30]
+LOCKED_WEEKEND_AGGREGATION = {
+    "LEVEL": "mean",
+    "INNOVATION": "mean",
+    "JUMP": "max",
+    "LEVEL_PLUS_JUMP": "mean(LEVEL)+max(JUMP)",
+}
 
 REQUIRED_HYP_FIELDS = {
     "id", "statement", "source", "data", "shock", "method",
@@ -123,3 +131,13 @@ def test_trial_log_present():
     tl = _cfg()["trial_log"]
     assert "n_trials" in tl and isinstance(tl["n_trials"], int)
     assert tl["n_trials"] >= 0
+
+
+def test_sca_timing_contract_locked():
+    """Horizon va weekend reducer la bac tu do pre-registered, khong duoc drift."""
+    sca = next(x for x in _cfg()["specification_curves"] if x["id"] == "SCA-01")
+    primary = sca["primary_cell"]
+    assert primary["focal_horizons"] == LOCKED_MONTHLY_FOCAL_HORIZONS
+    assert primary["daily_focal_horizons"] == LOCKED_DAILY_FOCAL_HORIZONS
+    assert primary["weekend_aggregation"] == LOCKED_WEEKEND_AGGREGATION
+    assert "E0_aligned_diagnostic" not in sca["blockers"]

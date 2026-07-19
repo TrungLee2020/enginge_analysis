@@ -16,7 +16,7 @@ tính đơn điệu, bản exo là bản dùng.
 Ràng buộc (docs/13 §2.6): KHÔNG chạm holdout, KHÔNG hồi quy outcome, report versioned,
 Guard P1 (mọi số từ stats). Thước đo: INNOVATION, JUMP, LEVEL+JUMP, LEVEL (§2.4).
 
-Chạy:  .venv/bin/python scripts/run_e1c_shock_detection.py
+Chạy:  python scripts/run_e1c_shock_detection.py
   - Có data/gold_events.csv  -> chạy cả exo + endo.
   - Không có                 -> chỉ endo (đối chứng) + cảnh báo gold set là blocker.
 """
@@ -69,6 +69,10 @@ def _git_commit() -> str:
 
 def _data_version(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
+
+
+def _report_path(dv: str, commit: str) -> Path:
+    return REPORTS / f"E1c_shock_detection_{dv}_{commit}.md"
 
 
 # ---------------------------------------------------------------------------
@@ -214,10 +218,11 @@ def main() -> None:
         stats["exo_rank"] = " > ".join(rank(exo_tbl))
         stats["exo_winner"] = rank(exo_tbl)[0]
 
-    parts = build_report(stats, endo_tbl, exo_tbl, dv, _git_commit(),
+    commit = _git_commit()
+    parts = build_report(stats, endo_tbl, exo_tbl, dv, commit,
                          dt.datetime.now().isoformat(timespec="seconds"))
     REPORTS.mkdir(parents=True, exist_ok=True)
-    out = REPORTS / f"E1c_shock_detection_{dv}.md"
+    out = _report_path(dv, commit)
     if out.exists():
         raise FileExistsError(f"{out} đã tồn tại — không ghi đè (docs/10 F1).")
     out.write_text("\n".join(parts), encoding="utf-8")

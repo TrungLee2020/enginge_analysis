@@ -56,7 +56,7 @@ def test_fill_weekend_forward_to_trading_day():
     dates = pd.to_datetime(["2022-01-07", "2022-01-08", "2022-01-09", "2022-01-10"])  # Fri,Sat,Sun,Mon
     gpr = pd.Series([10.0, 20.0, 30.0, 40.0], index=dates)
     trading = pd.to_datetime(["2022-01-07", "2022-01-10"])  # Fri, Mon
-    out = ds.fill_weekend(gpr, trading_days=trading)
+    out = ds.fill_weekend(gpr, trading_days=trading, aggregation="mean")
     # Thu 2 (Mon) phai gom trung binh T7+CN+T2 = mean(20,30,40)=30
     assert out.loc[pd.Timestamp("2022-01-10")] == pytest.approx(30.0)
     assert out.loc[pd.Timestamp("2022-01-07")] == pytest.approx(10.0)
@@ -67,9 +67,29 @@ def test_fill_weekend_forward_to_trading_day():
 def test_fill_weekend_first_window_does_not_average_all_history():
     dates = pd.date_range("2022-01-01", "2022-01-10", freq="D")
     gpr = pd.Series(np.arange(1.0, 11.0), index=dates)
-    out = ds.fill_weekend(gpr, trading_days=pd.DatetimeIndex(["2022-01-10"]))
+    out = ds.fill_weekend(
+        gpr,
+        trading_days=pd.DatetimeIndex(["2022-01-10"]),
+        aggregation="mean",
+    )
     # First requested session is Monday: only Sat/Sun/Mon, not Jan 1..10.
     assert out.loc[pd.Timestamp("2022-01-10")] == pytest.approx(9.0)
+
+
+def test_fill_weekend_max_preserves_tail_event():
+    dates = pd.to_datetime(["2022-01-08", "2022-01-09", "2022-01-10"])
+    jump = pd.Series([1.0, 9.0, 2.0], index=dates)
+    out = ds.fill_weekend(
+        jump,
+        trading_days=pd.DatetimeIndex(["2022-01-10"]),
+        aggregation="max",
+    )
+    assert out.loc[pd.Timestamp("2022-01-10")] == pytest.approx(9.0)
+
+
+def test_fill_weekend_rejects_unknown_aggregation():
+    with pytest.raises(ValueError, match="aggregation"):
+        ds.fill_weekend(pd.Series(dtype=float), [], aggregation="median")
 
 
 def test_align_frames_inner_join_on_time():

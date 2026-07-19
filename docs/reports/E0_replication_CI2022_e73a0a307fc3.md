@@ -1,5 +1,7 @@
 # E0 — Replication harness: Caldara-Iacoviello 2022
 
+> **Phạm vi chứng nhận (đính chính 2026-07-19):** PASS này xác nhận loader + LP/HAC theo timing headline của paper. Script đọc `load_gpr_monthly()` trực tiếp và không đi qua alignment M+1 của specification curve; vì vậy chưa đủ để gọi mọi null của pipeline aligned là “phát hiện thật”. Gate bổ sung: `scripts/run_e0_alignment_diagnostic.py`.
+
 > 🔬 Unit test cấp hệ thống (docs/11 §5.8, docs/12 §9). Tái lập ĐÚNG spec headline của paper trên pipeline của ta — KHÔNG cải tiến spec. Sinh bởi `scripts/run_e0_replication.py`.
 
 ## Metadata
@@ -21,7 +23,7 @@ Tiêu chí (chốt trước khi chạy): PASS nếu ≥1 horizon h∈1..6 có β
 
 - Horizon ngắn âm-có-ý-nghĩa: **[1, 2]** (2 cái).
 - Đáy IRF tại h=2: β=-0.3748 (p=0.0083) — GPR shock đẩy IP growth xuống mạnh nhất ở đây.
-- **Kết luận: pipeline ĐÚNG — kết quả null sau này là phát hiện thật.**
+- **Kết luận đã giới hạn lại:** replication headline đúng; panel M+1 đã được kiểm tra riêng tại `docs/reports/E0_alignment_diagnostic_e73a0a307fc3_c93a877.md` và PASS.
 
 ## Bảng IRF: log(GPR) → IP growth (%)
 
@@ -43,4 +45,4 @@ Tiêu chí (chốt trước khi chạy): PASS nếu ≥1 horizon h∈1..6 có β
 
 ## Ý nghĩa cho lưới SCA (docs/12 §9)
 
-Pipeline tái lập được C-I → đường nạp (GPR file + FRED + align tháng) và LP/HAC đúng. Kết quả null của G2a (daily/giá tài sản) và của lưới SCA sau này là **phát hiện thật**, không phải artifact pipeline. Gỡ blocker E0_replication của SCA-01.
+Pipeline tái lập được C-I → loader + LP/HAC theo timing của paper hoạt động. Kết quả này không đi qua alignment M+1 của lưới; diagnostic riêng `scripts/run_e0_alignment_diagnostic.py` đã PASS tại `docs/reports/E0_alignment_diagnostic_e73a0a307fc3_c93a877.md`.

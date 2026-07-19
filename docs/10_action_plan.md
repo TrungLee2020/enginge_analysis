@@ -53,7 +53,7 @@ Tests: 22/22 pass sau các thay đổi trên.
 | M5 | docs 00/01/02 | Nợ sync 09 §5 bỏ sót: 00 §3.bis (2 hệ số + mediation cũ), 00 §1 (schema cũ), 01 KĐ12 (nhân cùng horizon), 01 C2 (split cũ), 02 §3.6 (OOS cũ) |
 
 ### Không phải bug (đã kiểm, khỏi nghi lại)
-- `fill_weekend`: gán về ngày giao dịch **kế tiếp** — an toàn leakage.
+- `fill_weekend`: gán về ngày giao dịch **kế tiếp** sau D+1; caller phải khai báo reducer. Mean cho LEVEL/INNOVATION, max cho JUMP; composite ghép sau aggregation.
 - `ffill(limit=3)` trong build_tier2_panel: carry giá trị quá khứ — point-in-time hợp lệ.
 - HAC maxlags = max(horizons) cho mọi h: quá bảo thủ (SE hơi rộng), không sai.
 

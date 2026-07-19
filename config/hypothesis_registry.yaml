@@ -132,10 +132,12 @@ hypotheses:
     status: tested
     report: "docs/reports/E1b_shock_ranking_8cc9bfb5c3b6.md"
     result: >
-      Ranking (hit rate phát hiện episode, full sample): LEVEL+JUMP (68.7%) >
+      Ranking THEO NHÃN ARTIFACT (hit rate phát hiện episode, full sample): LEVEL+JUMP (68.7%) >
       JUMP (55.4%) > INNOVATION (32.5%). Winner LEVEL+JUMP đứng đầu ở MỌI
       sub-sample (pre-2008/2008-2015/post-2015). INNOVATION kém nhất — xác nhận
-      E1 trên toàn 166 episode, không chỉ Hormuz. → ô chính SCA-01 dùng LEVEL+JUMP.
+      E1 trên toàn 166 episode, không chỉ Hormuz. Kết luận chọn ô chính từ artifact
+      này đã bị rút; SCA-01 vẫn UNRESOLVED chờ E1c-exo.
+    artifact_formula: "Nhãn LEVEL+JUMP thực tế = INNOVATION+JUMP; xem ERRATA trong report"
     note: >
       Diagnostic, KHÔNG chạm holdout. E1 (1 episode Hormuz) đã gợi ý JUMP; E1b
       xác nhận trên toàn mẫu. Không đo trên outcome để không leak vào lưới SCA sau.
@@ -205,7 +207,13 @@ specification_curves:
       channel: act_threat_split
       jump_thresh: q95
       sample: full
-      focal_horizons: [6, 12]       # track tháng (ngày: [5,20]) — khóa trước, giảm tải bootstrap ~12× (docs/12 §5.1)
+      focal_horizons: [1, 2, 6]     # track tháng; giữ vùng tín hiệu E0 h=1,2 và mốc bền h=6
+      daily_focal_horizons: [5, 20, 30]  # bao phủ phát hiện G2a quanh h≈29
+      weekend_aggregation:          # aggregate sau D+1, trước khi ghép composite
+        LEVEL: mean
+        INNOVATION: mean
+        JUMP: max
+        LEVEL_PLUS_JUMP: "mean(LEVEL)+max(JUMP)"
     test_statistics: [median_effect, share_significant, stouffer_z]
     null_distribution:
       method: moving_block_bootstrap_under_null
@@ -217,7 +225,8 @@ specification_curves:
       se: white
       bands: sup_t_simultaneous
     status: registered_not_run
-    # DONE: build_monthly_panel, E0 replication PASS, holdout ghi g0 §2 (tách track ngày/tháng).
+    # DONE: build_monthly_panel, E0 replication headline PASS, E0 aligned diagnostic PASS
+    # (docs/reports/E0_alignment_diagnostic_e73a0a307fc3_c93a877.md), holdout ghi g0 §2.
     # docs/13 phát hiện E1b bị bác → cổng mới G-Gold/G-E1c/G-Primary trước khi chạy.
     blockers: [E1c_endo_rerun, gold_events_csv, E1c_exo, primary_cell_shock_resolved]
     commitment: >

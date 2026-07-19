@@ -1,5 +1,7 @@
 # E1c — Rank thước đo shock bằng AUC (sự kiện ngoại sinh)
 
+> **ERRATA / pipeline_note (2026-07-19):** Bản ENDO này dùng code cũ với nhãn `LEVEL+JUMP` nhưng công thức thực tế là `INNOVATION+JUMP`. Không dùng artifact này để chọn shock; phải chạy lại bằng HEAD sau khi test. Alignment/weekend aggregation cũng đã đổi nên các số cũ không tái lập trực tiếp.
+
 > 🔬 Research diagnostic (docs/13 §2, registry KĐ-E1c). THAY E1b: sửa lỗi episode nội sinh (§1.1) + ngưỡng 2σ không so được (§1.2). AUC bất biến biến đổi đơn điệu. KHÔNG chạm holdout, KHÔNG hồi quy outcome. Sinh bởi `scripts/run_e1c_shock_detection.py`.
 
 ## Metadata

@@ -1,6 +1,6 @@
 # 12 — GIAO THỨC SPECIFICATION CURVE (PRE-REGISTRATION)
 
-**Phiên bản:** 1.1 — 2026-07-19 (tái cấu trúc §2.1: outcome là trục báo cáo, FREQ tách riêng; sửa số mẫu §2.3; freight vào trục outcome; focal_horizons)
+**Phiên bản:** 1.2 — 2026-07-19 (khóa horizon theo E0/G2a; khóa weekend aggregation theo loại shock; thêm E0 aligned diagnostic)
 **Trạng thái:** 🔒 ĐĂNG KÝ TRƯỚC. Doc này phải được commit và ghi vào `config/hypothesis_registry.yaml` **TRƯỚC** khi chạy bất kỳ ô nào của lưới. Commit hash của doc này là bằng chứng thời điểm.
 **Quan hệ tài liệu:** thực thi §2 và §5 của `11_product_plan.md`. Ràng buộc governance: `g0_governance.md`. Suy diễn cho họ lưới dùng SCA thay vì hiệu chỉnh đa kiểm định (Bonferroni/Holm/Romano–Wolf) — xem §1.2. Không thay thế mục nào của `docs/11`.
 **Cơ sở phương pháp:** Simonsohn, Simmons & Nelson (2020), *Nature Human Behaviour* 4:1208–1214 — Specification Curve Analysis (SCA). Suy diễn LP: Montiel Olea & Plagborg-Møller (2021), *Econometrica* 89:1789–1823; dải đồng thời: Montiel Olea & Plagborg-Møller (2019), *JAE* 34:1–17.
@@ -110,10 +110,23 @@ FUNCFORM     = quantile τ=0.10
 CHANNEL      = tách ACT/THREAT
 JUMP_THRESH  = q95
 SAMPLE       = đầy đủ
-focal_horizons = [6, 12]                       # track tháng; ngày dùng [5, 20] — chốt trước (§5.1)
+focal_horizons = [1, 2, 6]                     # track tháng; bám tín hiệu E0 tại h=1,2
+daily_focal_horizons = [5, 20, 30]             # gồm h≈29 của G2a, chốt trước (§5.1)
 ```
 
-> ⚠️ Ô chính phải được điền và commit **trước** khi chạy. Trường `SHOCK` phụ thuộc **E1c-exo** (KHÔNG phải E1b — đã bị bác, docs/13 §1); nếu E1c-exo chưa xong, KHÔNG chạy lưới. `focal_horizons` chốt trước để giảm tải bootstrap (§5.1) — curve trả lời "hiệu ứng có bền qua spec không", là câu hỏi về spec chứ không về hình dạng theo horizon (hình dạng đã có dải sup-t lo trên ô chính).
+> ⚠️ Ô chính phải được điền và commit **trước** khi chạy. Trường `SHOCK` phụ thuộc **E1c-exo** (KHÔNG phải E1b — đã bị bác, docs/13 §1); nếu E1c-exo chưa xong, KHÔNG chạy lưới. Horizon tháng `[1,2,6]` giữ hai điểm duy nhất E0 đã phát hiện và một điểm bền hơn; horizon ngày `[5,20,30]` bao phủ vùng h≈29 từng xuất hiện ở G2a. Các mốc này được khóa trước lưới, không đổi sau khi xem curve.
+
+### 2.2.1. Gộp information-time cuối tuần theo loại shock
+
+Sau khi dịch GPR ngày D sang `available_at=D+1`, nhiều ngày lịch có thể cùng đi vào một
+phiên giao dịch. Toán tử gộp được đăng ký trước như sau:
+
+- `LEVEL`, `PERSISTENT`, `INNOVATION`: **mean**; không chọn cực trị của residual có dấu.
+- `JUMP`: **max**; mean sẽ làm mượt có hệ thống đúng các tail event cuối tuần.
+- `LEVEL+JUMP`: **mean(LEVEL) + max(JUMP)**; không lấy mean/max trực tiếp trên composite.
+
+Code chuẩn là `align_daily_shock_measures_to_information_time()`. Mọi report phải ghi
+`weekend_aggregation`; đổi toán tử sau khi lưới chạy được tính là một lần thử mới.
 
 ### 2.3. Cái gì KHÔNG được vào lưới
 
@@ -215,8 +228,9 @@ lần rồi ước lượng cả K spec → mỗi lần lặp là K spec × H ho
 = ~4.6 triệu hồi quy MỖI outcome × 8 outcome → hàng giờ–ngày. **Giảm bằng cách tính curve
 tại focal_horizons đăng ký trước, KHÔNG toàn bộ 24.** Lý do không chỉ tiết kiệm: curve trả
 lời "hiệu ứng có bền qua spec không" — câu hỏi về SPEC, không về hình dạng theo horizon
-(hình dạng đã có dải sup-t lo ở ô chính). Chốt: **h ∈ {6, 12} track tháng · {5, 20} track
-ngày** — giảm tải ~12 lần. Đây là bậc tự do → khóa ở đây, ghi registry.
+(hình dạng đã có dải sup-t lo ở ô chính). Chốt: **h ∈ {1, 2, 6} track tháng · {5, 20, 30}
+track ngày**. Track tháng giữ đúng vùng tín hiệu E0 (h=1,2); track ngày thêm h=30 để bao
+phủ phát hiện G2a quanh h≈29. Đây là bậc tự do → khóa ở đây, ghi registry.
 
 ### 5.2. Ô chính báo cáo riêng
 
@@ -301,10 +315,11 @@ Null thật, đã kiểm định trên toàn bộ curve (96 spec/curve × nhiề
 
 ## 9. CHECKLIST TRƯỚC KHI CHẠY
 
-- [ ] E1b xong (rank + σ), nhánh SHOCK đã xác định
+- [ ] E1c-endo đã chạy lại bằng contract đúng; E1c-exo xong và nhánh SHOCK đã xác định
 - [ ] Ô chính §2.2 đã điền đầy đủ và commit
 - [x] `build_monthly_panel()` đã viết và test; GPR tháng M được canh theo information-time vào bucket M+1
-- [ ] E0 replication harness đã chạy — nếu fail, **dừng**: cả 288 ô sẽ vô nghĩa
+- [x] E0 replication headline đã PASS — chỉ chứng nhận loader + LP theo timing của paper
+- [x] E0 aligned diagnostic (`python scripts/run_e0_alignment_diagnostic.py`) đã PASS — report `docs/reports/E0_alignment_diagnostic_e73a0a307fc3_c93a877.md`
 - [ ] Quyết định holdout A/B/C đã ghi vào `g0_governance.md` kèm ngày và lý do
 - [ ] Doc này đã commit; hash ghi vào `config/hypothesis_registry.yaml` như **một entry duy nhất**
 - [ ] Seed, B=1000, $\ell$ đã chốt trong config
@@ -319,8 +334,8 @@ Null thật, đã kiểm định trên toàn bộ curve (96 spec/curve × nhiề
 ánh tái cấu trúc §2.1 (2026-07-19): `grid_dimensions` (SHOCK/FREQ/FUNCFORM/CHANNEL/
 JUMP_THRESH/SAMPLE), `report_axis_outcome` (asset_price/real_macro/physical_channel —
 mỗi outcome 1 curve), `primary_cell` (outcome=IP, shock=UNRESOLVED chờ E1c-exo, freq=
-monthly, focal_horizons=[6,12]), `blockers=[gold_events_csv, E1c_exo, primary_cell_
-shock_resolved]`.
+monthly, focal_horizons=[1,2,6], daily_focal_horizons=[5,20,30]),
+`blockers=[E1c_endo_rerun, gold_events_csv, E1c_exo, primary_cell_shock_resolved]`.
 
 Còn phải điền khi commit: `protocol_commit` = commit hash của doc này.
 

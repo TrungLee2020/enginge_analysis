@@ -13,7 +13,8 @@ Khong dung trong production. Production di qua ext_series (dataset.load_*).
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Iterable
+import warnings
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 import numpy as np
@@ -82,20 +83,80 @@ def align_daily_gpr_to_information_time(
     gpr: pd.DataFrame,
     decision_days: Iterable[pd.Timestamp],
     publish_lag_days: int = GPR_DAILY_PUBLISH_LAG_DAYS,
+    aggregation: str | Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Gan GPR vao phien DA BIET du lieu, khong vao ngay bao chi duoc dem.
 
     GPR cua ngay D duoc publish som nhat o D+publish_lag_days. Moi phien quyet
-    dinh nhan trung binh cac gia tri moi biet tu sau phien truoc; vi vay tin
-    Thu Bay/Chu Nhat khong bi loai ma di vao phien tiep theo.
+    dinh nhan cac gia tri moi biet tu sau phien truoc. ``aggregation`` co the la
+    mot toan tu chung hoac mapping theo cot. Contract da dang ky: mean cho
+    LEVEL/INNOVATION, max cho JUMP. LEVEL+JUMP phai aggregate hai thanh phan
+    rieng roi moi cong bang ``align_daily_shock_measures_to_information_time``.
     """
+    if aggregation is None:
+        raise ValueError(
+            "Phai khai bao aggregation theo shock: mean cho LEVEL/INNOVATION, "
+            "max cho JUMP")
     days = pd.DatetimeIndex(pd.to_datetime(list(decision_days))).sort_values().unique()
     known = gpr.copy()
     known.index = pd.to_datetime(known.index) + pd.Timedelta(days=publish_lag_days)
-    return pd.DataFrame(
-        {col: fill_weekend(known[col], days) for col in known.columns},
-        index=days,
+
+    def reducer(col: str) -> str:
+        if isinstance(aggregation, str):
+            return aggregation
+        if col not in aggregation:
+            raise KeyError(f"Thieu aggregation cho cot {col!r}")
+        return aggregation[col]
+
+    return pd.DataFrame({
+        col: fill_weekend(known[col], days, aggregation=reducer(col))
+        for col in known.columns
+    }, index=days)
+
+
+def align_daily_shock_measures_to_information_time(
+    measures: pd.DataFrame,
+    decision_days: Iterable[pd.Timestamp],
+    publish_lag_days: int = GPR_DAILY_PUBLISH_LAG_DAYS,
+) -> pd.DataFrame:
+    """Align bo shock daily bang toan tu dung cho tung thanh phan.
+
+    LEVEL, PERSISTENT va INNOV dung mean; JUMP dung max. Cot LEVEL_PLUS_JUMP
+    khong duoc aggregate truc tiep: ham tinh lai no tu LEVEL da mean va JUMP da
+    max, tranh lam mut spike cuoi tuan.
+    """
+    composite_suffix = "_LEVEL_PLUS_JUMP"
+    base = measures.loc[:, [c for c in measures.columns
+                            if not c.endswith(composite_suffix)]]
+    aggregation = {
+        col: ("max" if col.endswith("_JUMP") else "mean")
+        for col in base.columns
+    }
+    aligned = align_daily_gpr_to_information_time(
+        base,
+        decision_days,
+        publish_lag_days=publish_lag_days,
+        aggregation=aggregation,
     )
+
+    prefixes = {
+        col[:-len(composite_suffix)]
+        for col in measures.columns if col.endswith(composite_suffix)
+    }
+    for prefix in prefixes:
+        level_col = f"{prefix}_LEVEL"
+        jump_col = f"{prefix}_JUMP"
+        if level_col not in aligned or jump_col not in aligned:
+            raise KeyError(
+                f"Can {level_col!r} va {jump_col!r} de tao {prefix + composite_suffix!r}")
+        aligned[f"{prefix}{composite_suffix}"] = (
+            aligned[level_col] + aligned[jump_col])
+    aligned.attrs.update(measures.attrs)
+    aligned.attrs["weekend_aggregation"] = {
+        "LEVEL": "mean", "INNOV": "mean", "JUMP": "max",
+        "LEVEL_PLUS_JUMP": "mean(LEVEL)+max(JUMP)",
+    }
+    return aligned
 
 
 def align_monthly_gpr_to_information_time(
@@ -235,7 +296,7 @@ def build_tier2_panel(
     refresh: bool = False,
     macro_vars: Iterable[str] = CORE_MACRO,
     shock_method: str = "innovation",
-    ffill_limit: int = 3,
+    ffill_limit: int | None = None,
 ) -> pd.DataFrame:
     """Panel san sang cho estimate_tier2 tren cac phien macro cung quan sat.
 
@@ -248,7 +309,8 @@ def build_tier2_panel(
     ------
     macro_vars : cac kenh macro dua vao (mac dinh CORE_MACRO = du 4 kenh; dxy da noi dai).
     shock_method : "innovation" (mac dinh hop le) | "zscore"/"log1p" (LEVEL doi chung).
-    ffill_limit : giu de tuong thich API; macro transformed KHONG con duoc ffill.
+    ffill_limit : tham so legacy, khong con tac dung. Truyen gia tri se phat
+                  ``DeprecationWarning``; hay bo tham so khoi caller.
     """
     gpr_raw = load_gpr_daily(gpr_path)
     gpr = transform_gpr_shocks(gpr_raw, method=shock_method)
@@ -257,13 +319,22 @@ def build_tier2_panel(
     cols = [c for c in macro_vars if c in macro.columns]
     macro = macro[cols]
 
-    # `ffill_limit` la tham so legacy. Khong ffill oil/dxy returns hay yield diff:
-    # lap lai gia tri cu qua holiday se tao mot quan sat thi truong khong ton tai.
-    _ = ffill_limit
+    # Khong ffill oil/dxy returns hay yield diff: lap lai gia tri cu qua holiday
+    # se tao mot quan sat thi truong khong ton tai.
+    if ffill_limit is not None:
+        warnings.warn(
+            "ffill_limit khong con tac dung; build_tier2_panel chi dung ngay macro "
+            "thuc su quan sat. Hay bo tham so nay.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     macro = macro.sort_index().loc[start:end] if end else macro.sort_index().loc[start:]
     macro_g = macro.dropna()
     decision_days = macro_g.index
-    gpr_g = align_daily_gpr_to_information_time(gpr, decision_days)
+    # transform_gpr_shocks o day chi tra LEVEL/INNOVATION co dau; reducer la mean.
+    # JUMP/composite cua lưới phai di qua helper chuyen dung o tren.
+    gpr_g = align_daily_gpr_to_information_time(
+        gpr, decision_days, aggregation="mean")
 
     panel = macro_g.join(gpr_g, how="inner").sort_index()
     # Complete-case 1 lan -> moi horizon khong thay doi mau vi NaN rai rac.

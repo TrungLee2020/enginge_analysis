@@ -217,6 +217,7 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
     parts.append("## Metadata\n")
     parts.append(f"- **shock_type**: `{shock_type}` (transform: `{meta['shock_method']}`)")
     parts.append(f"- **data_version** (sha256 GPR daily): `{meta['data_version']}`")
+    parts.append(f"- **pipeline_contract**: `{meta['pipeline_contract']}`")
     if meta.get("ar_orders"):
         orders_str = ", ".join(f"{k}={v}" for k, v in sorted(meta["ar_orders"].items()))
         parts.append(f"- **AR order (PERSISTENT, BIC/dev-window, pre-registered)**: "
@@ -300,7 +301,8 @@ def write_report(irf: pd.DataFrame, panel: pd.DataFrame, meta: dict) -> Path:
                  "rolling trên raw để giữ thông tin đuôi. zscore/log1p trực tiếp chỉ "
                  "là LEVEL đối chứng.")
     parts.append("- **Information time + phiên thật**: GPR ngày D chỉ dùng từ D+1; "
-                 "tin cuối tuần gộp vào phiên kế tiếp. Panel chỉ giữ ngày cả bốn macro "
+                 "INNOVATION cuối tuần dùng mean khi gộp vào phiên kế tiếp. JUMP trong "
+                 "lưới phải dùng max và LEVEL+JUMP phải ghép sau aggregation. Panel chỉ giữ ngày cả bốn macro "
                  "có quan sát, không forward-fill return/difference qua holiday.")
     parts.append("- **DXY nối dài**: DTWEXM (major, 1973→2019) nối DTWEXBGS (broad, "
                  "2006→) ở cấp return Δln (overlap 2006–2019 corr=0.926). Nhờ vậy có "
@@ -390,6 +392,7 @@ def main() -> None:
         "shock_type": shock_type,
         "shock_method": args.shock_method,
         "data_version": data_version,
+        "pipeline_contract": "daily-D+1_observed-macro_mean-innovation_no-ffill_v2",
         "version_tag": version_tag,
         "ar_orders": ar_orders,
         "git_commit": _git_commit(),

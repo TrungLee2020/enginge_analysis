@@ -58,12 +58,20 @@ def transform_global_macro(raw: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def fill_weekend(gpr: pd.Series, trading_days) -> pd.Series:
-    """Gan GPR ngay nghi vao ngay giao dich KE TIEP (docs/05 G2.1, cach AI-GPR xu ly).
+def fill_weekend(
+    gpr: pd.Series,
+    trading_days,
+    *,
+    aggregation: str,
+) -> pd.Series:
+    """Gan GPR ngay nghi vao ngay giao dich KE TIEP.
 
-    Voi moi ngay giao dich, lay TRUNG BINH GPR cua no va cac ngay nghi lien truoc
-    (ke tu ngay giao dich truoc do). Tra ve series chi tren trading_days.
+    ``aggregation`` phai duoc chot theo y nghia bien: ``mean`` cho LEVEL/INNOVATION
+    va ``max`` cho JUMP. Max giu lai cu soc duoi xay ra vao cuoi tuan thay vi lam
+    phang no bang trung binh. Tra ve series chi tren ``trading_days``.
     """
+    if aggregation not in {"mean", "max"}:
+        raise ValueError("aggregation phai la 'mean' hoac 'max'")
     trading = pd.DatetimeIndex(pd.to_datetime(trading_days)).sort_values()
     g = gpr.copy()
     g.index = pd.to_datetime(g.index)
@@ -78,7 +86,10 @@ def fill_weekend(gpr: pd.Series, trading_days) -> pd.Series:
     prev = trading[0] - pd.offsets.BDay(1)
     for d in trading:
         window = g.loc[(g.index > prev) & (g.index <= d)]
-        out[d] = window.mean() if len(window) else np.nan
+        if len(window):
+            out[d] = window.mean() if aggregation == "mean" else window.max()
+        else:
+            out[d] = np.nan
         prev = d
     return pd.Series(out).reindex(trading)
 

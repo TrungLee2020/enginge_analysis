@@ -1,5 +1,7 @@
 # E1 — Chẩn đoán spec shock quanh Hormuz 2026-02-28
 
+> **pipeline_note (2026-07-19):** Tính trên pipeline trước `c93a877`; HEAD hiện tại đã đổi information-time alignment, weekend aggregation và shock contract. Các con số dưới đây là artifact lịch sử, không tái lập trực tiếp từ HEAD.
+
 > 🔬 Research diagnostic (docs/11 §10 E1). KHÔNG chạm holdout, không đăng ký giả thuyết. Sinh bởi `scripts/run_e1_diagnosis.py`.
 
 ## Metadata

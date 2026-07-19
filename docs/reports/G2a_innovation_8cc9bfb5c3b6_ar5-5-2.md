@@ -1,5 +1,7 @@
 # G2a — Global Macro Impact (Tầng 2 cascade) — shock: innovation
 
+> **pipeline_note (2026-07-19):** Tính trên pipeline trước `c93a877`; HEAD hiện tại đã đổi information-time alignment, weekend aggregation, macro-day intersection và default shock. Các con số dưới đây là artifact lịch sử, không tái lập trực tiếp từ HEAD.
+
 > 🔬 Research deliverable. Local Projection (Jordà 2005), docs/07_formulas_reference_v2.md §3. Sinh tự động bởi `scripts/run_tier2.py`.
 
 ## Metadata

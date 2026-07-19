@@ -1,5 +1,7 @@
 # E1b — Rank thước đo shock theo sức phát hiện episode
 
+> **ERRATA / pipeline_note (2026-07-19):** Nhãn `LEVEL+JUMP` trong artifact này thực tế được code cũ tính bằng `INNOVATION+JUMP`. Ranking lịch sử vì vậy là `INNOVATION+JUMP > JUMP > INNOVATION`, không phải bằng chứng cho LEVEL. Artifact được giữ nguyên số liệu để audit; HEAD đã sửa contract, alignment, weekend aggregation và không tái lập trực tiếp các số dưới đây.
+
 > 🔬 Research diagnostic (docs/11 §10 E1b, registry KĐ-E1b). KHÔNG chạm holdout, KHÔNG hồi quy outcome (tránh circular với lưới SCA). Sinh bởi `scripts/run_e1b_shock_ranking.py`.
 
 ## Metadata

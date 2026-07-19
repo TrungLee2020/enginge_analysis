@@ -98,8 +98,10 @@ $$
 Áp dụng riêng cho threats và acts: $\text{GPT}^{\text{innov}}_t$, và $\text{GPA}^{\text{surprise}}_t$ (§2.2). **Quy tắc: mọi ký hiệu "shock" từ đây trở đi là innovation/surprise, KHÔNG phải level.**
 
 **Quy tắc thời điểm biết dữ liệu:** GPR daily của ngày $D$ chỉ vào information set từ
-$D+1$; các giá trị mới biết trong cuối tuần được gộp vào phiên kế tiếp. GPR monthly
-của tháng $M$ chỉ vào bucket quyết định $M+1$. Mọi backtest realtime vẫn phải lọc
+$D+1$; các giá trị mới biết trong cuối tuần được gộp vào phiên kế tiếp bằng **mean cho
+LEVEL/INNOVATION, max cho JUMP**. `LEVEL+JUMP` được tính sau gộp bằng
+`mean(LEVEL)+max(JUMP)`, không gộp trực tiếp composite. GPR monthly của tháng $M$ chỉ
+vào bucket quyết định $M+1$. Mọi backtest realtime vẫn phải lọc
 theo timestamp `available_at`, không chỉ dịch index theo ngày/tháng.
 
 ### 2.1. Vector shock

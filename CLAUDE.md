@@ -54,14 +54,14 @@ Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, line
 - **E1b archived/superseded:** ngoài lỗi episode nội sinh của docs/13, code cũ còn gắn nhãn `LEVEL+JUMP` cho `INNOVATION+JUMP`. Contract đã khóa lại thành `LEVEL+JUMP := LEVEL + JUMP`; report E1b cũ chỉ là artifact lịch sử, không dùng chốt ô chính.
 
 - **`build_monthly_panel()` implemented** (2026-07-19): track monthly, grid đầu-tháng thật (KHÔNG forward-fill, #10). GPR tháng M được canh information-time vào bucket M+1. Cột: `GPR_INNOV` (β), `GPRC_VNM_ORTH_INNOV` (λ), macro tổng hợp tháng. Rolling orthogonalization/vintage là Phase 2; test mới chưa được chạy trong phiên sửa này.
-- **E0 replication PASS** (2026-07-19): `scripts/run_e0_replication.py` — tái lập C-I 2022 (GPR→IP giảm h=1,2 p<0.10, đáy β=−0.37 h=2). Pipeline (nạp+align+LP+HAC) ĐÚNG → null của G2a/lưới SCA là phát hiện thật, không phải bug. Ngoại lệ #9 có chủ đích: E0 dùng log(GPR) LEVEL vì tái lập spec paper.
+- **E0 replication headline PASS** (2026-07-19): `scripts/run_e0_replication.py` — tái lập C-I 2022 (GPR→IP giảm h=1,2 p<0.10, đáy β=−0.37 h=2). **E0 alignment diagnostic PASS** tại `docs/reports/E0_alignment_diagnostic_e73a0a307fc3_c93a877.md` (raw h=2 → aligned h=1), nên blocker timing M+1 đã gỡ.
 - **docs/13 self-review + E1c** (2026-07-19): thiết kế AUC + gold set giữ nguyên, nhưng bản endo cũ bị vô hiệu bởi bug `LEVEL+JUMP`. Phải chạy lại endo sau contract fix; exo vẫn chờ gold set. **ô chính SCA-01 = UNRESOLVED**.
 
 **⚠️ Nợ đường tới hạn (docs/13 §5.1 — đường găng MỚI):**
 - **`data/gold_events.csv`** chưa có → chặn E1c-exo → chặn chốt ô chính → chặn lưới. **KHÔNG phải việc code**: cần 2 người dựng tay, KHÔNG tra GPRD (docs/13 §2.2, cổng G-Gold). Claude tự dựng = vi phạm chính nguyên tắc ngoại sinh.
 - **Lưới SCA-01 `blockers=[E1c_endo_rerun, gold_events_csv, E1c_exo, primary_cell_shock_resolved]`** — chưa được chạy.
 - Còn: protocol_commit docs/12 (chờ commit). Lỗi Romano-Wolf đã sửa; holdout đã ghi g0 §2 (tách track ngày/tháng).
-- **E0 replication harness** (Caldara-Iacoviello, docs/11 §5.8) — chặn lưới; docs/10 chưa liệt kê (nợ đồng bộ 10↔11).
+- **E0 aligned diagnostic** (Caldara-Iacoviello, docs/11 §5.8) — PASS; không còn chặn lưới.
 - **Entry SCA-01 vào registry** (docs/12 §10) + Guard-P1 test cho report generator.
 - **Quyết định USER (docs/11 §13):** holdout A/B/C cho 2026-H1 (Hormuz làm nó thành regime đơn lẻ) — phải ghi `g0_governance.md` TRƯỚC khi chạm holdout / chạy lưới; nới #6 cho chân B; bỏ tín hiệu giao dịch.
 - **Lỗi tham chiếu docs/12:** nói "thay thế Romano-Wolf ở doc 11 §8" nhưng doc 11 KHÔNG có Romano-Wolf — cần user đính chính.
@@ -135,7 +135,7 @@ Cước vận tải biển (docs/11 §5.3): `data_files.load_freight_monthly` (F
 - `dataset.py` — đường **production**, đọc `ext_series` từ PostgreSQL, point-in-time qua `load_series(..., as_of=...)`.
 - `data_files.py` — đường **research offline**, đọc file + FRED. Dùng lại đúng transform của `dataset.py` (`log1p_gpr`, `transform_global_macro`) — khác I/O, **không lặp lại quy ước biến đổi**. Thêm transform mới thì sửa ở `dataset.py`, không fork sang đây.
 
-Quy ước transform (docs/07 §0), sai là hỏng ước lượng: `LEVEL = log1p(GPR)` cho cả daily/monthly; shock chính là **INNOVATION = LEVEL − E[LEVEL|quá khứ]** (`shocks.innovation`, #9). `JUMP` tính trên chuỗi raw rolling để giữ thông tin đuôi; `LEVEL+JUMP := LEVEL + JUMP`, tuyệt đối không dùng `INNOVATION + JUMP`. Chế độ `--shock-method zscore|log1p` của `run_tier2` chỉ là LEVEL đối chứng và bị gắn INELIGIBLE. Oil/DXY → `Δln`; VIX → giữ level; US10Y → sai phân.
+Quy ước transform (docs/07 §0), sai là hỏng ước lượng: `LEVEL = log1p(GPR)` cho cả daily/monthly; shock chính là **INNOVATION = LEVEL − E[LEVEL|quá khứ]** (`shocks.innovation`, #9). `JUMP` tính trên chuỗi raw rolling để giữ thông tin đuôi; `LEVEL+JUMP := LEVEL + JUMP`, tuyệt đối không dùng `INNOVATION + JUMP`. Sau D+1, cuối tuần dùng mean cho LEVEL/INNOVATION, max cho JUMP; composite = mean(LEVEL)+max(JUMP). Chế độ `--shock-method zscore|log1p` của `run_tier2` chỉ là LEVEL đối chứng và bị gắn INELIGIBLE. Oil/DXY → `Δln`; VIX → giữ level; US10Y → sai phân.
 
 Gate là **người quyết, không phải máy**: `run_tier2.gate_checklist` xuất verdict + mục Human review; run trên level tự gắn `INELIGIBLE` theo nguyên tắc #9.
 
