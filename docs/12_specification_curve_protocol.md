@@ -166,11 +166,23 @@ Dữ liệu của dự án là quan sát (không phải thí nghiệm) → dùng
 5. Lặp bước 3–4 nhiều lần (**B = 1000**, chốt trước)
 6. Tính % đường cong tái chọn mẫu cho thống kê tổng thể cực đoan ít nhất bằng đường cong quan sát
 
-**Điều chỉnh cho chuỗi thời gian:** bước 3 rút hàng độc lập sẽ phá cấu trúc phụ thuộc thời gian. Dùng **moving-block bootstrap** với độ dài khối $\ell$ chốt trước:
-- panel tháng: $\ell = 12$
-- panel ngày: $\ell = 60$
+**Điều chỉnh cho chuỗi thời gian:** bước 3 rút hàng độc lập sẽ phá cấu trúc phụ thuộc thời gian. Dùng **moving-block bootstrap** với độ dài khối $\ell$.
 
-Đây là **sai lệch có chủ ý so với SSN2020** (họ giả định quan sát trao đổi được). Ghi rõ trong report; đây không phải tùy chọn tự do, giá trị $\ell$ khóa tại đây.
+**ℓ HIỆU CHỈNH TRÊN MÔ PHỎNG (2026-07-19, `run_sca_calibration.py`, report `SCA_calibration_*.md`):**
+ℓ=12 tháng / 60 ngày ở bản trước là PHÁN ĐOÁN, và kiểm size cho thấy **cả hai lệch**:
+
+| Track | ℓ cũ (phán đoán) | SIZE ở ℓ cũ | ℓ hiệu chỉnh | SIZE ở ℓ mới |
+|---|---|---|---|---|
+| tháng (n=378, ρ=0.85) | 12 | **0.117** (phình >2× danh nghĩa) | **18** | 0.083 |
+| ngày (n=2000, ρ=0.95) | 60 | **0.0** (mất power) | **40** | 0.05 (đúng) |
+
+ℓ tháng=12 quá nhỏ → phá autocorr → size phình; ℓ ngày=60 quá lớn → ít block → size về 0.
+**ℓ khóa mới: tháng = 18, ngày = 40.** Hiệu chỉnh này HỢP LỆ (mô phỏng, không đụng dữ
+liệu thật — docs/13 §5). ⚠️ Mô phỏng dùng AR(1); chuỗi thật có đuôi/regime phức tạp hơn,
+tháng ℓ=18 vẫn còn size 0.083 (hơi cao) → coi là cận dưới độ tin cậy. Đây không phải tùy
+chọn tự do; giá trị khóa ở đây + registry `block_length_*`, đổi = một lần thử mới.
+
+Đây là **sai lệch có chủ ý so với SSN2020** (họ giả định quan sát trao đổi được). Ghi rõ trong report.
 
 ### 3.3. Lợi ích phụ: bền với vi phạm giả định
 

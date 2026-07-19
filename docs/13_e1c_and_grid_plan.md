@@ -38,6 +38,22 @@ từ lần chạy E1c-endo mới sau khi sửa contract. Report E1b gọi đây 
 
 Nguyên tắc vi phạm (Ludvigson, Ma & Ng): các ràng buộc nhận dạng buộc một quan hệ phải đúng theo cấu tạo thì không hữu ích, vì chúng đòi hỏi kết luận phải thành lập ngay từ thiết kế.
 
+> **HẠ GIỌNG §1.1 (2026-07-19, sau E1c-endo mới):** theo tiêu chí tự-bác-bỏ §2.5 mà
+> chính doc này đăng ký, §1.1 **KHÔNG được xác nhận**. E1c-endo cho AUC: LEVEL+JUMP
+> 0.774 > LEVEL 0.740 > JUMP 0.719 > INNOVATION 0.712 — LEVEL về NHÌ, không "thắng
+> tuyệt đối". Hai lý do §1.1 yếu hơn tưởng, đều là lỗi đọc code: (a) ngưỡng endo là
+> TƯƠNG ĐỐI (`GPRD > q97.5 rolling(250)`) — đơn điệu theo "mức so cửa sổ lùi", gần
+> jump/innovation hơn là level tuyệt đối; (b) AUC đo khả năng PHÂN BIỆT, mà tính dai
+> dẳng của LEVEL làm nhòe ranh giới (LEVEL cao cả ở ngày không-sự-kiện kề bên). JUMP
+> — giống luật endo nhất về cấu tạo — chỉ thứ ba, thêm bằng chứng chống §1.1.
+> **Kết luận: lý do ưu tiên E1c-exo hơn E1b giờ CHỦ YẾU là §1.2 (thước đo AUC vs
+> hit-rate 2σ), KHÔNG phải §1.1 (định nghĩa sự kiện).** Bản exo VẪN cần — thước đo
+> dẫn xuất từ GPRD không thể tự xác thực trên tập sự kiện cũng dẫn xuất từ GPRD —
+> nhưng lý lẽ yếu hơn. ⚠️ Phán quyết này TẠM THỜI: E1c-endo chạy ở `adc2ac4`, TRƯỚC
+> bản vá aggregator max-cho-JUMP; sự kiện lớn nhất mẫu (28/02 — thứ Bảy) là cuối
+> tuần, AUC của JUMP nhiều khả năng tăng sau rerun → thứ hạng có thể đổi. Chờ
+> E1c_endo_rerun xác nhận.
+
 ### 1.2. Ngưỡng 2σ không so được giữa các thước đo
 
 Vấn đề thứ hai, **độc lập** với 1.1:

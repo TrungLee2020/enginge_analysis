@@ -170,6 +170,14 @@ hypotheses:
       chạy lại ENDO bằng code mới trước khi đọc ranking. Bản EXO (bản DÙNG) vẫn chặn
       bởi data/gold_events.csv. KHÔNG chốt ô chính từ endo. LEVEL là ngoại lệ
       measurement (không phải shock hồi quy nên #9 không áp).
+    level_plus_jump_composition: >
+      LEVEL+JUMP := LEVEL + JUMP là TỔNG THÔ hai chuỗi khác thang đo: LEVEL=ln(1+GPR)
+      ∈~[2,6.2] luôn dương + dai dẳng; JUMP=max(0,z−q95) bằng 0 trên ~95% ngày rồi
+      vọt ~6. Tổng phần lớn là LEVEL, thỉnh thoảng có bướu → trọng số hiện là TAI NẠN
+      thang đo, không phải lựa chọn. Đọc "LEVEL+JUMP thắng" = "mức dai dẳng có vai trò,
+      đuôi cộng thêm lên trên", KHÔNG phải cấu trúc riêng biệt. Giữ tổng thô (đã ghi
+      rõ phụ thuộc thang đo ở đây); nếu muốn trọng số bằng nhau thì chuẩn hóa z cả hai
+      trước khi cộng — quyết định khi chốt ô chính, ghi lại lúc đó.
 
 # ---------------------------------------------------------------------------
 # SPECIFICATION CURVE (docs/12) — entry đơn cho lưới 384 spec (SHOCK 4 mức)
@@ -218,8 +226,10 @@ specification_curves:
     null_distribution:
       method: moving_block_bootstrap_under_null
       B: 1000
-      block_length_monthly: 12
-      block_length_daily: 60
+      block_length_monthly: 18   # hiệu chỉnh 2026-07-19 (ℓ=12 cho size 0.117 phình; run_sca_calibration)
+      block_length_daily: 40     # hiệu chỉnh 2026-07-19 (ℓ=60 cho size 0.0 mất power)
+      block_length_calibration: "docs/reports/SCA_calibration_d6b118d.md — mô phỏng AR(1) dai dẳng, chọn ℓ giữ size gần 0.05"
+      engine_size_power_verified: true   # sca_engine size~danh nghĩa + power OK trên mô phỏng (test_sca_engine)
     lp_inference:
       method: lag_augmented_LP
       se: white
