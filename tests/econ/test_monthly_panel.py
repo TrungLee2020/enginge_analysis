@@ -38,7 +38,7 @@ def _fake_macro_monthly(n: int = 200) -> pd.DataFrame:
 
 @pytest.fixture
 def patched(monkeypatch):
-    monkeypatch.setattr(df_mod, "load_gpr_monthly", lambda path=None: _fake_monthly())
+    monkeypatch.setattr(df_mod, "load_gpr_monthly", lambda path=None, **kw: _fake_monthly())
     monkeypatch.setattr(df_mod, "load_macro_monthly", lambda *a, **k: _fake_macro_monthly())
 
 

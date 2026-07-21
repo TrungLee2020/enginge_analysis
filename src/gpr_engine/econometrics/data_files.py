@@ -347,16 +347,30 @@ def build_tier2_panel(
 DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202607.xls"
 
 
-def load_gpr_monthly(path: str = DEFAULT_GPR_MONTHLY) -> pd.DataFrame:
-    """Doc GPR (global monthly) + GPRC_VNM tu file monthly -> wide, index=dau thang.
+DEFAULT_COUNTRY = "VNM"
 
-    Gia tri THO, chua transform. Guard cot GPRC_VNM (tranh nham vintage 39 nuoc).
+
+def load_gpr_monthly(
+    path: str = DEFAULT_GPR_MONTHLY,
+    country: str = DEFAULT_COUNTRY,
+) -> pd.DataFrame:
+    """Doc GPR (global monthly) + GPRC_<country> tu file monthly -> wide, index=dau thang.
+
+    Gia tri THO, chua transform. Guard cot GPRC_<country> (tranh nham vintage 39 nuoc).
+
+    ``country`` la ma ISO-3 trong file 44 nuoc (VNM, POL, CHL, THA, IDN, PHL...).
+    Tham so hoa nay la dieu kien cua Phase 1b docs/14 §2: cascade tang 3 chay thu
+    tren mot NUOC PILOT ngoai lo trinh ban, de khong dot out-of-sample cua VN/TH/ID/PH.
+    Mac dinh VNM giu nguyen hanh vi cu.
     """
     df = pd.read_excel(path, sheet_name="Sheet1", header=0)
-    if "GPRC_VNM" not in df.columns:
+    col = f"GPRC_{country}"
+    if col not in df.columns:
+        available = sorted(c for c in df.columns if c.startswith("GPRC_"))
         raise ValueError(
-            "File monthly thieu GPRC_VNM — co the la vintage cu 39 nuoc historical-only.")
-    keep = ["month", "GPR", "GPRC_VNM"]
+            f"File monthly thieu {col} — co the la vintage cu 39 nuoc historical-only, "
+            f"hoac ma nuoc sai. Cac GPRC_* co trong file: {available}")
+    keep = ["month", "GPR", col]
     missing = [c for c in keep if c not in df.columns]
     if missing:
         raise ValueError(f"File monthly thieu cot: {missing}")
@@ -420,18 +434,171 @@ def load_freight_monthly(
     return s
 
 
-def freight_vintage(cache_dir: str = DEFAULT_CACHE_DIR) -> str | None:
-    """Hash sha256[:12] của cache freight (vintage FRED). None nếu chưa cache.
+def _cache_vintage(cache_dir: str, filename: str) -> str | None:
+    """Hash sha256[:12] của một file cache. None nếu chưa cache.
 
     #4 (docs review): data_version hiện chỉ hash GPRD → hai lần chạy với vintage
-    FRED freight KHÁC NHAU (PPI có hiệu chỉnh hồi tố!) mang cùng data_version. Report
-    nào dùng freight PHẢI ghi riêng `freight_vintage` này vào metadata để audit được.
+    FRED KHÁC NHAU mang cùng data_version. Mọi chuỗi FRED CÓ HIỆU CHỈNH HỒI TỐ
+    (PPI freight, INDPRO, CPI, EPU) phải ghi vintage riêng vào metadata report.
     """
     import hashlib
-    cache = Path(cache_dir) / "freight_raw.csv"
+    cache = Path(cache_dir) / filename
     if not cache.exists():
         return None
     return hashlib.sha256(cache.read_bytes()).hexdigest()[:12]
+
+
+def freight_vintage(cache_dir: str = DEFAULT_CACHE_DIR) -> str | None:
+    """Vintage cache freight (PPI có hiệu chỉnh hồi tố). Xem `_cache_vintage`."""
+    return _cache_vintage(cache_dir, "freight_raw.csv")
+
+
+def _load_fred_group(
+    codes: Mapping[str, str],
+    cache_name: str,
+    start: str,
+    end: str | None,
+    cache_dir: str,
+    refresh: bool,
+    resample: str | None = "MS",
+) -> pd.DataFrame:
+    """Kéo một nhóm series FRED -> wide THÔ (chưa transform), cache CSV.
+
+    ``codes`` : {ten_cot: fred_code}. ``resample``: 'MS' lấy giá trị cuối tháng cho
+    chuỗi tần suất cao hơn tháng; None giữ nguyên tần suất gốc.
+    """
+    cache = Path(cache_dir) / cache_name
+    if cache.exists() and not refresh:
+        return (pd.read_csv(cache, parse_dates=["date"])
+                .set_index("date").sort_index())
+
+    from pandas_datareader import data as pdr
+
+    end = end or dt.date.today().isoformat()
+    cols = {name: pdr.DataReader(code, "fred", start, end)[code]
+            for name, code in codes.items()}
+    raw = pd.DataFrame(cols).sort_index()
+    raw.index.name = "date"
+    if resample:
+        raw = raw.resample(resample).last()
+
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    raw.to_csv(cache)
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# OUTCOME VĨ MÔ THỰC (SCA-01 report_axis_outcome.real_macro) — docs/14 §1.2
+# ---------------------------------------------------------------------------
+# Cascade tới giờ dừng ở oil/dxy/vix/us10y/freight — đó là KÊNH TRUYỀN DẪN, chưa
+# phải vĩ mô. Sản phẩm "đánh giá xu hướng kinh tế vĩ mô" cần chính các biến này.
+# Registry SCA-01 đã đăng ký real_macro=[IP, CPI, infl_expectation] nhưng chưa có
+# loader; E0 tự kéo INDPRO trong script riêng. Đây là loader dùng chung, và nó
+# TÁI SỬ DỤNG ĐÚNG transform mà E0 đã validate (100·Δln INDPRO) — không fork.
+#
+# ⚠️ HIỆU CHỈNH HỒI TỐ: INDPRO và CPIAUCSL đều được revise nhiều kỳ sau publish
+# (INDPRO revise tới 5 năm). Bản kéo từ FRED là VINTAGE MỚI NHẤT, không phải cái
+# người ra quyết định thấy lúc đó. Với ước lượng γ (mô tả truyền dẫn) điều này
+# chấp nhận được; với backtest point-in-time thì KHÔNG — phải qua ALFRED vintage.
+# Ghi `real_macro_vintage()` vào metadata mọi report dùng nhóm này.
+FRED_REAL_MACRO = {
+    "ip": "INDPRO",         # Industrial Production index, monthly SA
+    "cpi": "CPIAUCSL",      # CPI-U all items, monthly SA
+    "infl_exp": "MICH",     # Michigan survey, kỳ vọng lạm phát 1 năm (%/năm)
+}
+
+
+def load_real_macro_monthly(
+    start: str = "1985-01-01",
+    end: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """IP / CPI / kỳ vọng lạm phát THÔ (mức) monthly từ FRED, cache CSV."""
+    return _load_fred_group(FRED_REAL_MACRO, "real_macro_raw.csv",
+                            start, end, cache_dir, refresh)
+
+
+def transform_real_macro(raw: pd.DataFrame) -> pd.DataFrame:
+    """Mức -> biến đích của LP. Quy ước (docs/07 §0, nhất quán với E0):
+
+    - ``ip``       : 100·Δln  → tăng trưởng sản xuất công nghiệp %/tháng. ĐÚNG
+      transform E0 đã tái lập được C-I 2022 trên chính pipeline này (β=−0.37, h=2).
+    - ``cpi``      : 100·Δln  → lạm phát %/tháng.
+    - ``infl_exp`` : sai phân → THAY ĐỔI kỳ vọng lạm phát (điểm %). Là mức khảo sát
+      dai dẳng nên xử như us10y (#9: mức không đọc được là phản ứng cú sốc).
+    """
+    out = pd.DataFrame(index=raw.index)
+    if "ip" in raw:
+        out["ip"] = 100.0 * dlog(raw["ip"])
+    if "cpi" in raw:
+        out["cpi"] = 100.0 * dlog(raw["cpi"])
+    if "infl_exp" in raw:
+        out["infl_exp"] = raw["infl_exp"].diff()
+    return out
+
+
+def real_macro_vintage(cache_dir: str = DEFAULT_CACHE_DIR) -> str | None:
+    """Vintage cache real macro (INDPRO/CPI revise hồi tố). Xem `_cache_vintage`."""
+    return _cache_vintage(cache_dir, "real_macro_raw.csv")
+
+
+# ---------------------------------------------------------------------------
+# BENCHMARK BATTERY (docs/14 §1.1 + §2 mục 1a bản b) — EPU / WUI
+# ---------------------------------------------------------------------------
+# Nguyên tắc #6 đo incremental IC; docs/14 nâng lên: hệ số GPR phải sống sót KHI
+# CÓ MẶT các chỉ số bất định đã publish của đội khác. Không so với zero, so với
+# state of the art. EPU=Baker-Bloom-Davis, WUI=Ahir-Bloom-Furceri.
+#
+# GPR và EPU/WUI cùng họ "chỉ số đếm tin" → dùng CHUNG quy ước log1p của GPR
+# (dataset.log1p_gpr), không đặt quy ước riêng.
+#
+# ⚠️ CÁCH DÙNG: battery vào hồi quy như CONTROL, và phải ĐỒNG THƯỚC ĐO với shock —
+# shock chạy LEVEL thì control là LEVEL; shock chạy INNOVATION thì control phải qua
+# `shocks.innovation` cùng spec. So level-control với innovation-shock là khập
+# khiễng và sẽ thổi phồng phần "riêng của GPR". Loader này trả LEVEL (log1p);
+# việc khớp thước đo là của runner.
+FRED_BENCHMARK = {
+    "epu_us": "USEPUINDXM",      # US Economic Policy Uncertainty, monthly, 1985+
+    "epu_global": "GEPUCURRENT",  # Global EPU (GDP-weighted, current prices), 1997+
+}
+
+# WUI không có trên FRED — tải tay từ worlduncertaintyindex.com, đặt vào đây với
+# 2 cột: date (đầu tháng hoặc quý), wui. Cùng kiểu "dữ liệu người phải cung cấp"
+# như data/gold_events.csv.
+DEFAULT_WUI_PATH = "data/wui_global.csv"
+
+
+def load_benchmark_monthly(
+    start: str = "1985-01-01",
+    end: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    refresh: bool = False,
+    wui_path: str | None = DEFAULT_WUI_PATH,
+) -> pd.DataFrame:
+    """Battery THÔ (mức chỉ số) monthly: epu_us, epu_global, + wui nếu có file.
+
+    WUI thiếu file -> BỎ QUA im lặng nhưng cột vắng mặt; runner phải ghi vào report
+    rằng battery chạy thiếu WUI. Không tự bịa chuỗi thay thế.
+    """
+    out = _load_fred_group(FRED_BENCHMARK, "benchmark_raw.csv",
+                           start, end, cache_dir, refresh)
+    if wui_path and Path(wui_path).exists():
+        wui = pd.read_csv(wui_path, parse_dates=["date"]).set_index("date")["wui"]
+        # WUI công bố theo QUÝ ở nhiều vintage; upsample về đầu tháng KHÔNG được
+        # forward-fill (#10). Chỉ join đúng tháng có quan sát.
+        out = out.join(wui.resample("MS").last(), how="outer").sort_index()
+    return out
+
+
+def transform_benchmark(raw: pd.DataFrame) -> pd.DataFrame:
+    """Battery mức -> log1p (cùng quy ước GPR). Giữ tên cột."""
+    return raw.apply(log1p_gpr)
+
+
+def benchmark_vintage(cache_dir: str = DEFAULT_CACHE_DIR) -> str | None:
+    """Vintage cache battery (EPU có revise khi thêm báo). Xem `_cache_vintage`."""
+    return _cache_vintage(cache_dir, "benchmark_raw.csv")
 
 
 def load_macro_monthly(
@@ -468,21 +635,36 @@ def build_monthly_panel(
     max_order: int = 5,
     extra_monthly: pd.DataFrame | None = None,
     freight: bool = False,
+    country: str = DEFAULT_COUNTRY,
+    real_macro: bool = False,
+    battery: bool = False,
 ) -> pd.DataFrame:
-    """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_VNM⊥ + macro.
+    """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_<c>⊥ + macro.
 
     Nguyen tac #10: KHONG forward-fill xuong daily. Grid la dau thang that.
 
     Cot ra:
-      - `GPR_INNOV`            : β global-direct (GPR global monthly, innovation)
-      - `GPRC_VNM_ORTH_INNOV`  : λ domestic-direct — GPRC_VNM da ORTHOGONALIZE khoi
-                                 GPR global (bo phan chung) roi innovation. KHONG
-                                 lo GPRC_VNM tho (#9).
+      - `GPR_INNOV`                : β global-direct (GPR global monthly, innovation)
+      - `GPRC_<country>_ORTH_INNOV`: λ domestic-direct — GPRC_<country> da
+                                 ORTHOGONALIZE khoi GPR global (bo phan chung) roi
+                                 innovation. KHONG lo GPRC_<country> tho (#9).
       - macro_vars (oil/dxy/vix/us10y) tong hop ve thang.
       - freight=True: them cot `freight` (Δln PPI deep sea freight, docs/11 §5.3) —
         kenh vat ly Hormuz/Malacca ngoai 4 kenh tai chinh. Mac dinh False de khong
         pha panel cu.
-      - extra_monthly: outcome vi mo thuc (IP/CPI...) neu E3 cung cap — join theo thang.
+      - real_macro=True: them `ip`/`cpi`/`infl_exp` (SCA-01 report_axis_outcome
+        .real_macro) — OUTCOME vi mo THUC, cai ma san pham goi la "xu huong kinh te
+        vi mo". Ghi `real_macro_vintage()` vao metadata report (revise hoi to).
+      - battery=True: them `epu_us`/`epu_global` LEVEL log1p lam CONTROL benchmark
+        (docs/14 §2 muc 1a ban b). Xem canh bao dong thuoc do o `FRED_BENCHMARK` —
+        control phai cung thuoc do voi shock. ⚠️ `epu_global` chi tu 1997 nen
+        complete-case se CAT PANEL ve 1997+ (mat ~7 nam so ban khong battery);
+        chay ca hai ban a/b thi phai so tren CUNG MAU, khong so 1990+ voi 1997+.
+        WUI KHONG vao day (quy, xem ghi chu trong than ham).
+      - extra_monthly: cot monthly khac do caller cung cap — join theo thang.
+
+    ⚠️ `country`: doi nuoc KHONG doi bat cu gi khac trong panel — tang 1-2 la ENGINE
+    generic (#8), chi tang 3 co params rieng nuoc. Dung cho Phase 1b (nuoc pilot).
 
     Innovation monthly: AR(p) rolling, p chon BIC/dev-window (giong daily, nhung
     min_train nho hon vi mau thang it). Complete-case 1 lan.
@@ -490,22 +672,23 @@ def build_monthly_panel(
     from .shocks import innovation
     from .tier3_country import orthogonalize
 
-    gpr_m = load_gpr_monthly(gpr_path)                       # GPR, GPRC_VNM (tho)
+    gpr_m = load_gpr_monthly(gpr_path, country=country)      # GPR, GPRC_<c> (tho)
     gpr_m = gpr_m.loc[start:end] if end else gpr_m.loc[start:]
+    country_col = f"GPRC_{country}"
 
     # GPR global -> innovation (β). log1p ap trong innovation(is_level=False).
     gpr_innov = innovation(gpr_m["GPR"], min_train=min_train,
                            max_order=max_order).rename("GPR_INNOV")
 
-    # GPRC_VNM: log1p -> orthogonalize khoi GPR global (level) -> innovation (λ).
-    #   Phan RIENG cua VN (⊥ global) moi la domestic-direct (docs/07v2 §4.1, #8).
+    # GPRC_<c>: log1p -> orthogonalize khoi GPR global (level) -> innovation (λ).
+    #   Phan RIENG cua nuoc c (⊥ global) moi la domestic-direct (docs/07v2 §4.1, #8).
     lg = pd.DataFrame({
-        "vnm": log1p_gpr(gpr_m["GPRC_VNM"]),
+        "ctry": log1p_gpr(gpr_m[country_col]),
         "gpr": log1p_gpr(gpr_m["GPR"]),
     }).dropna()
-    vnm_orth = orthogonalize(lg, target="vnm", on=["gpr"])   # residual = VN rieng
-    vnm_orth_innov = innovation(vnm_orth, is_level=True, min_train=min_train,
-                                max_order=max_order).rename("GPRC_VNM_ORTH_INNOV")
+    ctry_orth = orthogonalize(lg, target="ctry", on=["gpr"])  # residual = phan rieng
+    vnm_orth_innov = innovation(ctry_orth, is_level=True, min_train=min_train,
+                                max_order=max_order).rename(f"{country_col}_ORTH_INNOV")
 
     # Gia tri cua thang M chi duoc dung trong bucket M+1 (sau khi thang M ket
     # thuc). Khong join GPR thang M voi outcome cung thang M nhu the da biet tu
@@ -521,6 +704,16 @@ def build_monthly_panel(
     if freight:
         fr_raw = load_freight_monthly(start, end, cache_dir, refresh)
         frames.append(transform_freight(fr_raw))
+    if real_macro:
+        frames.append(transform_real_macro(
+            load_real_macro_monthly(start, end, cache_dir, refresh)))
+    if battery:
+        # wui_path=None CÓ CHỦ ĐÍCH: WUI publish theo QUÝ ở nhiều vintage; join vào
+        # grid tháng để lại NaN 2/3 số hàng, và complete-case ở cuối hàm sẽ XÓA 2/3
+        # panel — im lặng. Forward-fill quý->tháng thì vi phạm #10. WUI phải do
+        # runner xử lý tường minh ở tần suất của nó (load_benchmark_monthly).
+        frames.append(transform_benchmark(
+            load_benchmark_monthly(start, end, cache_dir, refresh, wui_path=None)))
     if extra_monthly is not None:
         frames.append(extra_monthly)
     panel = frames[0].to_frame() if isinstance(frames[0], pd.Series) else frames[0]

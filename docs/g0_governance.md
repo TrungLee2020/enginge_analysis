@@ -1,6 +1,6 @@
 # G0 — Research Governance
 
-**Phiên bản:** 1.0 — 2026-07-18
+**Phiên bản:** 1.1 — 2026-07-21 (thêm §7: hai quyết định governance đang mở, phát hiện khi đối chiếu `docs/14` v1.2 với code)
 **Quan hệ tài liệu:** thực thi bước D1 trong `10_action_plan.md` §113. Được `09_review_response.md` §2.8 yêu cầu (🔴 bắt buộc). Claims matrix nằm ở `07_formulas_reference_v2.md` §6.4 — file này **trỏ về**, không lặp.
 
 > Mục đích: chống data-snooping và HARKing (hypothesizing after results are known) bằng **kỷ luật ghi trước, khóa bằng máy** — không bằng lời hứa. Đây là điều kiện tiên quyết để mọi cổng GO/NO-GO sau này (D3, D4, G3) có giá trị.
@@ -107,3 +107,49 @@ Reduced-form LP → gọi "transmission decomposition"/"predictive", **KHÔNG "c
 - [x] AR order khóa trong registry (pre-registration trước khi đọc G2a).
 - [x] `tests/test_registry_locked.py` enforce cấu trúc + khóa spec bằng máy.
 - [x] Holdout/multiple-testing/versioning policy viết rõ; claims matrix trỏ về 07v2 §6.4.
+
+---
+
+## 7. QUYẾT ĐỊNH ĐANG MỞ — chưa chốt, **không được ngầm hiểu là đã chốt**
+
+Cả hai phát hiện 2026-07-21 khi đối chiếu `docs/14` với code. Ghi ở đây vì đây là **quyết định governance**, không phải lựa chọn kỹ thuật: cái nào cũng đổi nghĩa của một nguyên tắc đã khóa. Chưa chốt thì registry **chưa được sửa** theo hướng nào.
+
+### 7.1 SHOCK mặc định — LEVEL, hay để làm trục báo cáo?
+
+`docs/14` v1.1 §2 mục 1c ghi "shock mặc định = LEVEL". Va chạm ba chỗ:
+
+1. **CLAUDE.md #9** — level vào hồi quy rồi gọi hệ số là "tác động của cú sốc" là sai khái niệm.
+2. **`scripts/run_tier2.py:76`** — `GATE_ELIGIBLE_SHOCK_TYPES = {"innovation"}`, run LEVEL tự đóng dấu `INELIGIBLE`.
+3. **E0 tự khai** level là ngoại lệ có chủ đích, chỉ dùng khi tái lập spec người khác.
+
+Lịch sử: E1 → E1b → E1c chưa từng kết luận được thước đo nào thắng. `SCA-01.primary_cell.shock = UNRESOLVED`, chặn bởi `data/gold_events.csv` (cần 2 người dựng tay).
+
+**Ba lựa chọn:**
+
+| | Chọn | Hệ quả phải làm kèm |
+|---|---|---|
+| A | **SHOCK làm trục báo cáo** cho bảng γ mô tả: chạy cả {LEVEL, INNOVATION, LEVEL+JUMP}, báo cáo hết, không chọn | Sửa `GATE_ELIGIBLE_SHOCK_TYPES` cho phép mọi thước đo khi report **ghi cả ba**. `primary_cell.shock` vẫn UNRESOLVED. **Không** đụng #9 |
+| B | LEVEL thành mặc định nhà | Sửa **CLAUDE.md #9** + cổng máy + registry, **cùng một commit**. Phải viết lý do vào đây, không để trong checkbox |
+| C | Giữ INNOVATION, hoãn 1a tới khi có gold set | Đường găng dài thêm không xác định; docs/14 sinh ra để gỡ đúng chỗ nghẽn này |
+
+**Khuyến nghị: A.** Chọn một thước đo bây giờ là chốt bằng thẩm quyền chứ không bằng bằng chứng — đúng cái HARKing mà registry sinh ra để chặn. Bảng γ là **mô tả**, curve SCA mới là **suy diễn**; hai việc không cần chung một quyết định. Nếu ba thước đo cho cùng câu chuyện thì kết luận bền hơn hẳn so với chọn trước một cái.
+
+**Chốt:** _chưa điền_ · **Người:** _chưa điền_ · **Ngày:** _chưa điền_ · **Lý do:** _chưa điền_
+
+### 7.2 Chân B không còn development window (cutoff × split)
+
+`docs/14` §3.1.3 buộc claim dự báo chân B chỉ kiểm trên dữ liệu **sau training cutoff của scorer**. Với GPT-4o-mini (cutoff ≈ 10/2023), post-cutoff = 2024+. Nhưng §2 file này khóa: Pseudo-OOS 2024–2025, Final holdout 2026-H1.
+
+**Cửa sổ sạch duy nhất của chân B CHÍNH LÀ pseudo-OOS + holdout.** Chân B không còn development window. KĐ8 trên track tháng ≈ 24 quan sát — không đủ power cho kết luận nào.
+
+Đây là ràng buộc số học giống hệt §2 (holdout tháng rỗng theo cấu tạo): không phải tranh luận về *chất lượng* cửa sổ, mà là nó **không tồn tại**.
+
+| | Lối ra | Đánh đổi |
+|---|---|---|
+| (i) | KĐ8 đánh ở tần suất **ngày/tuần** | 2024–2025 cho ~500 quan sát thay vì 24. Cần collector chân B chạy dày |
+| (ii) | 2024–2025 = **development window của chân B**; claim dự báo hoãn tới khi 2026-H2+ đủ dữ liệu | Trung thực nhất, chậm nhất. Trần claim chân B v1 = `association` |
+| (iii) | Scorer có cutoff **sớm hơn** để 2021–2023 thành post-cutoff sạch | Đổi chất lượng chấm lấy sạch thời gian |
+
+**Khuyến nghị: (i)+(ii).** Nhất quán với §2: trần claim thấp hơn không hỏng sản phẩm, nhưng **phải được ghi ra thay vì ngầm hiểu**.
+
+**Chốt:** _chưa điền_ · **Người:** _chưa điền_ · **Ngày:** _chưa điền_ · **Lý do:** _chưa điền_

@@ -39,7 +39,7 @@ def test_freight_in_monthly_panel(monkeypatch):
     # freight raw (mức giá) — loader trả về mức, build_monthly_panel transform
     fake_freight = pd.Series(500 + rng.standard_normal(n).cumsum(), index=midx, name="freight")
 
-    monkeypatch.setattr(df_mod, "load_gpr_monthly", lambda path=None: fake_gpr)
+    monkeypatch.setattr(df_mod, "load_gpr_monthly", lambda path=None, **kw: fake_gpr)
     monkeypatch.setattr(df_mod, "load_macro_monthly", lambda *a, **k: fake_macro)
     monkeypatch.setattr(df_mod, "load_freight_monthly", lambda *a, **k: fake_freight)
 
@@ -59,7 +59,7 @@ def test_monthly_panel_without_freight_unchanged(monkeypatch):
     gpr = 100 + rng.standard_normal(n).cumsum() * 3
     vnm = 0.02 + np.abs(rng.standard_normal(n)) * 0.03
     monkeypatch.setattr(df_mod, "load_gpr_monthly",
-                        lambda path=None: pd.DataFrame({"GPR": gpr, "GPRC_VNM": vnm}, index=midx))
+                        lambda path=None, **kw: pd.DataFrame({"GPR": gpr, "GPRC_VNM": vnm}, index=midx))
     monkeypatch.setattr(df_mod, "load_macro_monthly",
                         lambda *a, **k: pd.DataFrame({"oil": rng.standard_normal(n) * 0.05,
                                                       "vix": 20 + rng.standard_normal(n)}, index=midx))
