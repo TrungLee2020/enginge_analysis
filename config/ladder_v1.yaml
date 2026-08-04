@@ -1,0 +1,35 @@
+# Escalation Ladder V1 — bang nguong rule-based (docs/00 §4.1).
+#
+# ⚠️ NGUONG KHOI TAO tu vi du trong docs/00 §4.1 — chua hieu chinh tren du lieu.
+# Doi bat ky nguong nao = tao version MOI (ladder_v2.yaml), khong sua tai cho:
+# `config_version` di theo tung hang ladder_state, hai run khac nguong khong
+# duoc tron lan (CLAUDE.md #4).
+#
+# Chi bao la PERCENTILE 0..100, caller tinh expanding/rolling KHONG lookahead:
+#   s_gpr_pair_pct : percentile S-GPR cap (indices.s_gpr.expanding_percentile)
+#   quad3_pct      : GDELT QuadClass-3 verbal conflict percentile  (chan C — CHUA ingest)
+#   quad4_pct      : GDELT QuadClass-4 material conflict percentile (chan C — CHUA ingest)
+#   jump_pct       : percentile JUMP chan A (docs/15 §3: "trigger tam bang JUMP
+#                    chan A" cho toi khi chan C co; spec goc ghi "GPA spike")
+#
+# NaN (chi bao chua co du lieu) -> dieu kien khong thoa (conservative, khong leo
+# bac vi thieu bang chung). Chua co GDELT thi: S4 van bat duoc qua jump_pct
+# (mode: any); S2 KHONG bat duoc (can quad3/quad4) — day la han che thuc, ghi
+# ro o day thay vi ha nguong cho chay duoc.
+#
+# S1 (khau chien) va S3 (chuan bi/dong vien): docs/00 §4.1 CHUA cho nguong —
+# cho user chot, KHONG tu bia. Engine doc bat ky state nao co trong config.
+
+version: ladder_v1
+states:
+  - state: 4            # hanh dong: material conflict cao HOAC cu soc duoi (GPA/JUMP)
+    mode: any
+    conditions:
+      - {indicator: quad4_pct, op: ">", value: 90}
+      - {indicator: jump_pct,  op: ">", value: 95}
+  - state: 2            # de doa: loi noi leo thang + verbal conflict, CHUA hanh dong
+    mode: all
+    conditions:
+      - {indicator: s_gpr_pair_pct, op: ">",  value: 75}
+      - {indicator: quad3_pct,      op: ">",  value: 75}
+      - {indicator: quad4_pct,      op: "<=", value: 75}

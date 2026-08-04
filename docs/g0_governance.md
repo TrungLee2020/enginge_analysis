@@ -134,7 +134,9 @@ Lịch sử: E1 → E1b → E1c chưa từng kết luận được thước đo 
 
 **Khuyến nghị: A.** Chọn một thước đo bây giờ là chốt bằng thẩm quyền chứ không bằng bằng chứng — đúng cái HARKing mà registry sinh ra để chặn. Bảng γ là **mô tả**, curve SCA mới là **suy diễn**; hai việc không cần chung một quyết định. Nếu ba thước đo cho cùng câu chuyện thì kết luận bền hơn hẳn so với chọn trước một cái.
 
-**Chốt:** _chưa điền_ · **Người:** _chưa điền_ · **Ngày:** _chưa điền_ · **Lý do:** _chưa điền_
+**Chốt: A** · **Người:** user (ủy quyền "xử lý theo khuyến nghị", phiên 2026-08-02) · **Ngày:** 2026-08-02 · **Lý do:** như khuyến nghị — bảng γ là mô tả, không chốt thước đo bằng thẩm quyền; `primary_cell.shock` giữ UNRESOLVED chờ E1c-exo.
+
+**Điều kiện kèm (ghi vào A trước khi thi hành, theo docs/15 §5 mục 1):** trong bảng γ, hệ số của **LEVEL/LEVEL+JUMP chỉ eligible khi ước lượng bằng `inference="lag_augmented"`** — lag augmentation partial-out phần đã dự báo được của level ngay trong hồi quy (MO-PM 2021), nên hệ số đọc được là phản ứng với phần *bất ngờ*; không có nó thì LEVEL vào hồi quy đúng là lỗi #9. INNOVATION eligible với cả hai chế độ suy diễn. Cổng máy (`gate_shock_eligibility` trong runner) mã hóa đúng điều kiện này.
 
 ### 7.2 Chân B không còn development window (cutoff × split)
 
@@ -152,4 +154,4 @@ Lịch sử: E1 → E1b → E1c chưa từng kết luận được thước đo 
 
 **Khuyến nghị: (i)+(ii).** Nhất quán với §2: trần claim thấp hơn không hỏng sản phẩm, nhưng **phải được ghi ra thay vì ngầm hiểu**.
 
-**Chốt:** _chưa điền_ · **Người:** _chưa điền_ · **Ngày:** _chưa điền_ · **Lý do:** _chưa điền_
+**Chốt: (i)+(ii)** · **Người:** user (ủy quyền, phiên 2026-08-02) · **Ngày:** 2026-08-02 · **Lý do:** như khuyến nghị — KĐ8 đánh ở daily/weekly để có power (~500 quan sát); 2024–2025 tuyên bố là **development window của chân B**; trần claim chân B v1 = `predictive, chưa xác nhận holdout`, ghi trên mọi output chân B. Scorer track-record dùng model local pin cứng (docs/15 §5 mục 3).

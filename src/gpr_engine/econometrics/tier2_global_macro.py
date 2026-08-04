@@ -18,10 +18,18 @@ from collections.abc import Iterable
 
 import pandas as pd
 
-from .local_projection import run_local_projection
+from .local_projection import (
+    DEFAULT_SUPT_SEED,
+    DEFAULT_SUPT_SIMS,
+    run_local_projection,
+)
 
 DEFAULT_MACRO = ["oil", "dxy", "vix", "us10y"]
 DEFAULT_SHOCKS = ["GPRD", "GPRD_ACT", "GPRD_THREAT"]
+
+BASE_COLS = ["macro_var", "shock", "horizon", "beta", "se", "tstat",
+             "pvalue", "ci_low", "ci_high", "nobs", "converged"]
+SUPT_COLS = ["ci_low_supt", "ci_high_supt", "supt_c"]
 
 
 def estimate_tier2(
@@ -31,21 +39,52 @@ def estimate_tier2(
     controls: Iterable[str] = (),
     horizons: Iterable[int] = range(0, 31),
     macro_lags: int = 1,
+    inference: str = "hac",
+    lags: int = 4,
+    simultaneous: bool = False,
+    method: str = "ols",
+    tau: float = 0.5,
+    ci: float = 0.90,
+    n_sim: int = DEFAULT_SUPT_SIMS,
+    seed: int = DEFAULT_SUPT_SEED,
 ) -> pd.DataFrame:
     """Uoc luong tang 2 cho moi (macro_var, shock).
 
     df : da align + transform (dataset.transform_global_macro cho macro; log1p_gpr cho shock).
     macro_lags : so lag cua chinh bien vi mo dua vao controls (rho trong cong thuc).
+        CHI dung khi inference="hac" — xem canh bao ben duoi.
+
+    Tham so suy dien (docs/14 M8/M9, pre-register o SCA-01.lp_inference)
+    ---------------------------------------------------------------------
+    Truyen thang xuong `run_local_projection`; MAC DINH giu nguyen ban cu
+    (hac / OLS / khong sup-t) nen moi report da sinh khong doi. Bang γ cua
+    Phase 1a phai goi voi inference="lag_augmented", simultaneous=True va lap
+    method="quantile" theo tau — day la spec da khoa trong registry, khong phai
+    lua chon cua runner.
+
+    ⚠️ inference="lag_augmented" ep `macro_lags=0`. Lag augmentation TU them lag
+    cua y (=M) va cua shock; giu them `macro_lags` se tao cot lag TRUNG KHIT voi
+    cot ma run_local_projection sinh ra -> X'X suy bien, pinv chia doi he so
+    giua hai cot giong het nhau va SE mat y nghia. Dieu chinh so lag bang `lags`,
+    khong bang `macro_lags`.
 
     Returns
     -------
     DataFrame long: [macro_var, shock, horizon, beta, se, tstat, pvalue,
-                     ci_low, ci_high, nobs]. beta = γ (impulse response).
+                     ci_low, ci_high, nobs] (+ ci_low_supt/ci_high_supt/supt_c
+    khi simultaneous=True). beta = γ (impulse response).
     """
     macro_vars = list(macro_vars)
     shocks = list(shocks)
     controls = list(controls)
     horizons = list(horizons)
+
+    if inference == "lag_augmented" and macro_lags:
+        raise ValueError(
+            f"inference='lag_augmented' voi macro_lags={macro_lags}: lag cua M se bi "
+            "them HAI LAN (mot lan o day, mot lan trong run_local_projection) -> cot "
+            "trung khit, X'X suy bien, SE vo nghia. Dat macro_lags=0 va dieu chinh "
+            "do sau lag bang tham so `lags`.")
 
     missing = [c for c in [*macro_vars, *shocks, *controls] if c not in df.columns]
     if missing:
@@ -66,6 +105,8 @@ def estimate_tier2(
                 work, y=M, shock=shock,
                 controls=[*controls, *lag_cols],
                 horizons=horizons,
+                inference=inference, lags=lags, simultaneous=simultaneous,
+                method=method, tau=tau, ci=ci, n_sim=n_sim, seed=seed,
             )
             irf = irf.reset_index()  # horizon la cot
             irf.insert(0, "shock", shock)
@@ -73,8 +114,8 @@ def estimate_tier2(
             frames.append(irf)
 
     out = pd.concat(frames, ignore_index=True)
-    return out[["macro_var", "shock", "horizon", "beta", "se", "tstat",
-                "pvalue", "ci_low", "ci_high", "nobs"]]
+    cols = BASE_COLS + [c for c in SUPT_COLS if c in out.columns]
+    return out[cols]
 
 
 def global_macro_impact_index(irf: pd.DataFrame, shock: str = "GPRD") -> pd.DataFrame:

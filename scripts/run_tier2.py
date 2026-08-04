@@ -71,9 +71,21 @@ MACRO_LABEL = {
     "us10y": "ΔUS10Y (yield %)",
 }
 
-# Loai shock -> co du dieu kien ket luan gate khong (CLAUDE.md #9: shock = innovation).
-# Level-based van chay duoc (doi chung/lich su) nhung report tu danh dau KHONG ket luan.
-GATE_ELIGIBLE_SHOCK_TYPES = {"innovation"}
+# Loai shock -> co du dieu kien ket luan gate khong.
+#
+# ⚠️ RUNNER NAY LA TRACK DAILY voi inference="hac" (mac dinh cua estimate_tier2) —
+# KHONG dung lag augmentation. Duoi che do do, DEC-2026-08-02-shock-axis van bat
+# LEVEL la INELIGIBLE: dieu kien cua quyet dinh A la LEVEL chi doc duoc khi
+# inference="lag_augmented". Nen tap nay giu nguyen {"innovation"} — no la HE QUA
+# cua cong may trong `econometrics.shock_axis`, khong phai mot hang so doc lap.
+# Bang γ tang 2 day du (Phase 1a, lag-augmented + sup-t) chay o scripts/run_t2_full.py.
+from gpr_engine.econometrics.shock_axis import (  # noqa: E402
+    eligible_measures,
+)
+
+_RUNNER_INFERENCE = "hac"
+# {"innovation"} — sinh tu cong may thay vi go tay, de sua cong la sua ca hai cho.
+GATE_ELIGIBLE_SHOCK_TYPES = {m.lower() for m in eligible_measures(_RUNNER_INFERENCE)}
 
 
 def _git_commit() -> str:

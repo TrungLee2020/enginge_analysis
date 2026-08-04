@@ -41,7 +41,46 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-07-21)
+## Trạng thái hiện tại (cập nhật 2026-08-03)
+
+### 📄 `docs/16` — AI-GPR (Iacoviello & Tong 2026) đổi hướng một phần kế hoạch
+
+Tác giả gốc của GPR publish bản LLM của chính chỉ số đó + dữ liệu công khai. Ba khối thành **ingest thay vì build** (LLM scoring tin tức, kênh energy, country sub-index). Đọc `docs/16` trước khi làm gì liên quan chân A.
+
+- **⛔ Blocker mới, chặn cả `docs/16` §9 Phase 1: chưa ai tải dữ liệu AI-GPR.** `load_ai_gpr_daily()` đã có nhưng `AI_GPR_COLUMNS` là schema **giả định** — lần tải đầu phải chạy `describe_ai_gpr_file()` đối chiếu. Cố ý **không tự fetch**: trang cập nhật định kỳ, fetch ngầm làm report cũ mất tái lập (#4). Registry: `data_blockers.ai_gpr_data_unverified`.
+- **`docs/16` §2.1 đã tự đính chính** sau khi kiểm bằng dữ liệu dự án (`docs/reports/E2_component_decomposition_e73a0a307fc3.md`). Doc lập luận persistent > shock nên `INNOVATION` là "nửa yếu" → **cơ chế đúng** (`corr(β_LEVEL, β_INNOVATION)=0.9985` dưới lag-aug — FWL), **kết luận định lượng sai**: hệ số thô của hai thành phần có `Var` lệch ~10 lần nên không so được; chuẩn hóa thì **48.9% ô đảo chiều**. Cùng tai nạn thang đo với `LEVEL+JUMP`.
+- **Spec kép (`docs/16` §2.2) — code xong, chờ dữ liệu.** `shocks.delta_decomposition`: `Δ LEVEL = ANTICIPATED + SURPRISE`, **SURPRISE ≡ `innovation()`** nên hai thành phần cộng lại bằng *đúng* Δ LEVEL (đồng nhất thức, test khóa). Phân rã trên **sai phân**, không trên mức. So sánh hai hệ số **bắt buộc chuẩn hóa** (`standardized_contribution`).
+- **`DEC-2026-08-03-dual-component`** amend `DEC-2026-08-02-shock-axis`: trục SHOCK chính → robustness; **giữ nguyên** điều kiện `lag_augmented`. `SCA-01.primary_cell.shock` **vẫn UNRESOLVED** — chốt bằng spec kép là chốt bằng *thiết kế* chứ không bằng E1c-exo (khóa bằng test).
+- **Tầng 4 có thân (2026-08-03):** `econometrics/analogue.py` (M5) + `reporting/{guard,composer}.py` (M6). **Guard P1 giờ chạy RUNTIME**, không còn là test rời chép lại logic ở mỗi script — `NarrativeBuilder.render()` là cửa duy nhất lấy text ⇒ quên gọi guard là không thể. Composer có **ba lớp bắt ba loại lỗi khác nhau**: Guard P1 bắt **số** bịa · `assert_claim_ceiling` bắt **từ ngữ** vượt mức nhận dạng (không số nào sai) · `check_component_labelling` bắt gọi ANTICIPATED là cú sốc.
+- 263 test pass.
+
+## Trạng thái trước đó (2026-08-02)
+
+**`docs/15` là bản đọc-trước cho hướng global** (4 tầng: ingest → LLM đo → công thức truyền dẫn → nhận định). §5 = chữ ký ĐÃ KÝ, §6 = khoảng trống code, §7 = đọc bảng γ.
+
+### ⛳ Bảng γ đầu tiên ĐÃ TỒN TẠI — `docs/reports/T2_full_f2579b30928f.md`
+
+Phase 1a chạy xong 2026-08-02 (`scripts/run_t2_full.py`). Mẫu **231 tháng** (2007-02→2026-06), 3600 hàng γ + 6000 hàng phân vị. **Chờ human review** (mục cuối report).
+- Ô đồng thuận cả ba thước đo: **GPR_ACT → IP, h=2, âm**, sống sót battery EPU — cùng hiện tượng E0 replication nhưng mẫu/suy diễn khác, và tách được ACT≠THREAT.
+- **Giá tài sản 0/4** ở cả ba thước đo (ngược G2a cũ level-based — cái đó đã vô hiệu). Human review quyết: thông tin thật hay mất power.
+- **KHÔNG đọc "LEVEL+JUMP thắng 6 ô" là chốt ô chính** — `primary_cell.shock` vẫn UNRESOLVED, trọng số LEVEL+JUMP là tai nạn thang đo (registry `level_plus_jump_composition`).
+- Chi phí mẫu 231 là CÓ CHỦ ĐÍCH: LEVEL+JUMP ăn 120 tháng warmup + EPU global từ 1997. Một mẫu duy nhất là điều kiện để bản a/b và ba thước đo so được (docs/14 §2 1a).
+
+### ✅ 4 quyết định governance đã ký (2026-08-02), khóa máy trong registry `decisions:`
+
+`DEC-2026-08-02-shock-axis` (g0 §7.1=**A**, SHOCK là trục báo cáo) · `-holm-family` (docs/14 §6.6=**B**, họ = nhóm outcome pre-register) · `-chanb-window` (g0 §7.2=**(i)+(ii)**) · `-sources-trading` (Trump+MOFA CN; bỏ tín hiệu giao dịch). Sửa/rút phải cập nhật `LOCKED_DECISION_IDS` cùng commit.
+**Còn mở:** docs/14 §6.2 người chấm mẫu thứ hai — cần con người, không ủy quyền máy được.
+
+- **M10 done (2026-08-02):** `econometrics/multiplicity.py` — `holm()` + `holm_by_family()`. FWER dưới phụ thuộc **bất kỳ**, không bootstrap, KHÔNG dùng `arch`/SPA/StepM (chúng dựng cho so nhiều *chiến lược*, không phải 3–8 outcome). `family` **cố ý không có mặc định**: chọn họ sau khi thấy p-value là HARKing. `PREREGISTERED_OUTCOME_FAMILIES` (4/3/1) để sẵn cho lựa chọn B của `docs/14` §6.6 — dùng khi ký.
+- **M8/M9 giờ mới thật sự dùng được (2026-08-02):** `estimate_tier2`/`estimate_tier3` trước đó **không truyền** `inference`/`simultaneous`/`method`/`tau`/`lags` xuống `run_local_projection` → bảng γ 1a chỉ chạy được bằng đúng cái inference mà `SCA-01.lp_inference` nói là sai. Đã nối; **mặc định vẫn `hac`/OLS/không sup-t**, report cũ không đổi.
+- **Hai lỗ im lặng sup-t đã bịt:** (1) `simultaneous=True` + `inference="hac"` từng trả `beta ± c·se_HAC` — trộn Ω của EHW với SE của HAC → giờ **raise**; (2) `simultaneous=True` + `return_all=True` tính hàm ảnh hưởng xong rồi **vứt** (đường tầng 3 đi) → giờ trả dải cho mọi hệ số, mỗi hệ số một `supt_c` riêng.
+- **`estimate_tier2(inference="lag_augmented")` ép `macro_lags=0`** (raise nếu >0): lag augmentation tự thêm lag của y, giữ `macro_lags` sinh cột **trùng khít** → `pinv` không báo lỗi mà chia đôi hệ số, SE mất nghĩa.
+- **Chân B hết stub trên đường LLM (2026-08-02):** `scoring/statement_scorer.py` (encoder→LLM temp 0.1, JSON strict, contamination trong prompt, `training_cutoff` bắt buộc, cache 5 trục version) · `indices/s_gpr.py` (công thức docs/00 §2.5, 2 chiều không net, `w(role)`=INIT #7, `expanding_percentile` **strict `<`** vì zero-inflation) · `econometrics/ladder.py` + `config/ladder_v1.yaml` (rule-based, ngưỡng version-hóa; S1/S3 chưa có ngưỡng — chờ user; chưa GDELT nên S2 không bắt được, S4 bắt qua JUMP chân A). Test fake LLM, không mạng. **Taxonomy kênh chỏi nhau** docs/00 (6) vs docs/14/15 (4) — mapping 6→4 chỉ điền cặp hiển nhiên, còn lại None chờ chốt (docs/15 §6.2b).
+- **Lỗ im lặng thứ ba (2026-08-02):** QuantReg (IRLS) không hội tụ thì statsmodels chỉ `warn` rồi **trả hệ số vòng lặp cuối** — số chạy thẳng vào report, warning bay lên stderr rồi mất. `run_local_projection` giờ trả cột `converged`; bảng in `‡` thay vì số (386/6000 hàng phân vị của T2-full rơi vào đó).
+- 196 test pass.
+- **Chưa làm:** human review bảng γ · §6.2 người chấm thứ hai → 2c chân B · 1b tier3 (chờ chuỗi thị trường pilot WIG/IPSA) · M5–M7 tầng 4 (analogue/composer/track record). Xem `docs/15` §6.
+
+## Trạng thái trước đó (2026-07-21)
 
 **Hướng sản phẩm giờ do `docs/14` v1.2 chi phối** (docs/13 hạ xuống refinement, không chặn). Đọc `docs/14` trước khi làm tiếp; §9 là nhật ký thi công, §6 là các quyết định đang chờ user.
 
@@ -98,7 +137,16 @@ Môi trường: `.venv/` ở repo root (layout WSL/Linux — interpreter là **`
 .venv/bin/python -m ruff check .                 # lint (có ~7 lỗi E702/E401 sẵn trong notebook/script — không phải do bạn)
 ```
 
-**Research runner tầng 2 (G2a, offline — không cần PostgreSQL):**
+**Phase 1a — bảng γ tầng 2 track THÁNG (deliverable chính):**
+
+```bash
+.venv/bin/python scripts/run_t2_full.py                 # đầy đủ (~5.5 phút)
+.venv/bin/python scripts/run_t2_full.py --no-quantile   # bỏ nhánh phân vị (~1 phút)
+```
+
+Trục SHOCK 3 mức × 3 kênh × 8 outcome × 2 bản battery. Spec KHÓA trong file (`INFERENCE`, `FOCAL_HORIZONS`, `TAUS`) — sửa là sửa quyết định đã ký, phải đồng bộ registry + test cùng commit.
+
+**Research runner tầng 2 (G2a daily, offline — không cần PostgreSQL):**
 
 ```bash
 python scripts/run_tier2.py                            # mặc định shock=innovation hợp lệ
@@ -126,14 +174,29 @@ python -m gpr_engine.ingest.market_data --dsn "$DSN" --source fred
 
 ## Bản đồ code
 
-**8 module còn là stub `raise NotImplementedError` ngay khi import** — chưa viết, không phải hỏng. Import chúng là crash. Đã thực thi: `ingest/*` (3), `econometrics/{dataset, data_files, local_projection, tier2_global_macro, tier3_country, shocks, panel_var, sca_engine}`. Còn stub: `econometrics/{surprise, ladder, tvp_var}`, `indices/*` (3), `backtest/*` (2), `scoring/statement_scorer`. (docs/11 §4 §7 có bảng module đầy đủ + việc cần làm cho từng cái, gồm cả module mới chưa tồn tại: `econometrics/analogue.py`, `scoring/{policy_scorer,track_record}.py`.)
+**6 module còn là stub `raise NotImplementedError` ngay khi import** — chưa viết, không phải hỏng. Import chúng là crash. Còn stub: `econometrics/{surprise, tvp_var}`, `indices/{builder, divergence}`, `backtest/*` (2). Mọi thứ khác đã thực thi. (docs/11 §4 §7 có bảng module đầy đủ + việc cần làm cho từng cái, gồm cả module mới chưa tồn tại: `econometrics/analogue.py`, `scoring/{policy_scorer,track_record}.py`.)
 
 Cascade 3 tầng (nguyên tắc #8) ánh xạ thẳng vào cây thư mục — đây là trục kiến trúc chính:
 
 - `econometrics/shocks.py` — **G2.0, input của cascade**: LEVEL≠SHOCK. `innovation()` (AR(p), p từ `select_ar_order` BIC/trần-5), `jump()`, `gpa_surprise_v1()`. Mọi hồi quy shock LẤY TỪ ĐÂY, không đưa level vào (#9). Order pre-registered trong registry — đổi phải cập nhật `tests/test_registry_locked.py`.
-- `econometrics/tier2_global_macro.py` — **tầng 1–2, ENGINE generic**: shock → Oil/DXY/VIX/US10Y. Ước lượng 1 lần, country-agnostic.
-- `econometrics/tier3_country.py` — **tầng 3, PARAMS từng nước**: tách BA hệ số `β` (global-direct) / `θ` (indirect, tính bằng **tích chập** qua horizon) / `λ` (domestic-direct, từ `GPR^{c,⊥}` đã orthogonalize). Hệ số đọc từ `config/params/<country>.yaml`, không điền tay. Đóng góp kênh dùng Shapley/LMG.
-- `econometrics/local_projection.py` — LP dùng chung cho cả hai tầng. Hai chế độ suy diễn: `inference="hac"` (mặc định, bản cũ) và `inference="lag_augmented"` (MO-PM 2021 — **tự thêm lag của cả y lẫn shock**, HC1 thay HAC; thiếu lag của SHOCK là sụp cơ sở bỏ HAC, nên đừng tự ghép tay qua `controls`). `simultaneous=True` cho dải sup-t: đọc "IRF vượt 0 ở h=7" từ dải pointwise trên 25 horizon là đọc sai — ~2,5 điểm nằm ngoài ngay cả khi model đúng. `method="quantile"` cho τ; sup-t + quantile raise `NotImplementedError` (cần bootstrap, M10).
+- `econometrics/tier2_global_macro.py` — **tầng 1–2, ENGINE generic**: shock → Oil/DXY/VIX/US10Y. Ước lượng 1 lần, country-agnostic. Truyền thẳng `inference`/`lags`/`simultaneous`/`method`/`tau`/`seed` xuống LP (mặc định = bản cũ). ⚠️ `lag_augmented` **ép `macro_lags=0`** — giữ cả hai là lag trùng khít, X'X suy biến, SE vô nghĩa mà không có lỗi nào bắn ra.
+- `econometrics/tier3_country.py` — **tầng 3, PARAMS từng nước**: tách BA hệ số `β` (global-direct) / `θ` (indirect, tính bằng **tích chập** qua horizon) / `λ` (domestic-direct, từ `GPR^{c,⊥}` đã orthogonalize). Hệ số đọc từ `config/params/<country>.yaml`, không điền tay. Đóng góp kênh dùng Shapley/LMG. `simultaneous=True` cho dải sup-t **theo từng hệ số**; cột lag augmentation gắn `role="lag_augmentation"` (nuisance, không đọc như β/θ/λ).
+- `econometrics/local_projection.py` — LP dùng chung cho cả hai tầng. Hai chế độ suy diễn: `inference="hac"` (mặc định, bản cũ) và `inference="lag_augmented"` (MO-PM 2021 — **tự thêm lag của cả y lẫn shock**, HC1 thay HAC; thiếu lag của SHOCK là sụp cơ sở bỏ HAC, nên đừng tự ghép tay qua `controls`). `simultaneous=True` cho dải sup-t: đọc "IRF vượt 0 ở h=7" từ dải pointwise trên 25 horizon là đọc sai — ~2,5 điểm nằm ngoài ngay cả khi model đúng. **`simultaneous` CHỈ hợp lệ với `lag_augmented`** (Ω là EHW; ghép với SE HAC = hai bộ sai số chuẩn trong một dải) — raise. Với `return_all=True` trả `supt_c` **riêng cho từng hệ số**. `method="quantile"` cho τ; sup-t + quantile raise `NotImplementedError` (cần bootstrap).
+- `econometrics/shock_axis.py` — **cổng máy của `DEC-2026-08-02-shock-axis`**: `gate_shock_eligibility(measure, inference)`. LEVEL/LEVEL+JUMP **chỉ eligible với `lag_augmented`** — đó là điều kiện làm quyết định A không phá #9. Nới cổng cho `hac` = rút lại chữ ký; `test_shock_axis_gate_matches_signed_decision` bắt. Còn chứa **cổng NHÃN** của spec kép (`check_component_labelling`): gọi `β_ANTICIPATED` là "cú sốc" → raise. Đó là Guard P1 cho **nhãn** thay vì cho **số** — spec kép không phá #9 nhờ cách gọi tên, không nhờ công thức.
+- `econometrics/shocks.delta_decomposition` — **spec kép `docs/16` §2.2**: `Δ LEVEL = ANTICIPATED + SURPRISE`. **SURPRISE ≡ `innovation()`** (vì `Ê[Δlevel] = Ê[level] − level₋₁`) nên ANTICIPATED lấy bằng hiệu → hai thành phần cộng lại bằng *đúng* Δ LEVEL, không thể lệch do hai đường ước lượng. Phân rã trên **sai phân**, KHÔNG dùng `persistent_ar` (= Ê[LEVEL], gần nghiệm đơn vị → quay lại vấn đề #9). So hai hệ số **bắt buộc** qua `standardized_contribution` — `Var(ANT)/Var(SUR)≈0.1` nên hệ số thô không so được (E2: 48.9% ô đảo chiều).
+- `econometrics/multiplicity.py` — **M10, bội giữa OUTCOME**: `holm()` + `holm_by_family()`. Chiều **horizon đã do sup-t xử lý** — phạt lại ở đây là mất hết power. Một hàng = một kiểm định = một (outcome, shock) trên CẢ đường IRF, **không phải** một (outcome, shock, horizon); truyền cả 25 horizon vào là phạt chiều horizon lần thứ hai. `family` bắt buộc khai báo (governance §6.6 chưa ký); họ phải phân hoạch + phủ hết, thiếu là raise.
+
+Chân B (đường LLM, docs/15 tầng 2 — phân công: **LLM đo và diễn đạt, công thức truyền dẫn**):
+
+- `scoring/statement_scorer.py` — **cửa duy nhất LLM chạm vào số liệu**: encoder lọc (callable tiêm vào, ngưỡng 0.6) → LLM chấm `{v ±1.0, commitment, specificity, channel, target}` JSON strict — sai key/miền là `ScoreParseError`, không sửa hộ. `training_cutoff` bắt buộc (contamination docs/14 §3.1). Client LLM tiêm vào (`LLMClient`), test dùng fake — **không viết test gọi API thật**.
+- `indices/s_gpr.py` — công thức docs/00 §2.5 sau khi LLM đã chấm. S-GPR/S-CONC **giữ riêng, không net**. `w(role)` là INIT (#7) — role lạ raise. `expanding_percentile` **strict `<`**: chuỗi zero-inflated (JUMP) mà dùng `<=` thì ngày im ắng ra p~100, trigger nổ mỗi ngày.
+- `econometrics/ladder.py` — máy trạng thái S0–S4, ngưỡng ở `config/ladder_v1.yaml` (đổi ngưỡng = file version mới, không sửa tại chỗ). Input là cột percentile do caller tính không-lookahead. NaN = không thỏa. S1/S3 chưa có ngưỡng (docs/00 §4.1 chưa cho) — thêm là phải hỏi user.
+Tầng 4 (nhận định — ghép γ + tiền lệ + đo lường, gắn nhãn claim):
+
+- `econometrics/analogue.py` — **M5, k-NN tiền lệ**. Bốn ràng buộc docs/11 §6 là **cơ chế**: `n<5` → raise (im lặng, cổng P3 — hạ ngưỡng để có số là biến "không biết" thành "biết mơ hồ") · IQR đổi dấu → "phân tán, không kết luận", KHÔNG đưa trung vị ra một mình · `episode_table()` luôn liệt kê được · `available_at ≤ t` **kể cả trong retrieval** (ứng viên phải nằm trước `as_of` VÀ đã diễn biến xong tới đó — lấy episode cách 3 ngày rồi đọc kết cục h=30 là look-ahead trá hình). Descriptor dùng **expanding**, không chuẩn hóa toàn mẫu. Claim ceiling `association`. ⚠️ Thiết kế này **không có tiền lệ trong literature GPR** (docs/11 §6 tự ghi) — độ chắc chắn thấp hơn §5.2/§5.3.
+- `reporting/guard.py` — **Guard P1 dùng chung, chạy RUNTIME**. `NarrativeBuilder.render()` là **cửa duy nhất** lấy text ⇒ quên guard là không thể. Ba thứ nó KHÔNG làm (đọc trước khi tin): không kiểm số đúng/sai · không hiểu ngữ nghĩa ("tăng 5%" khi payload nói giảm vẫn lọt) · không bắt số bị bỏ sót. **Đừng đưa số vào văn xuôi tự do** — dùng trường số trong payload, guard sẽ chặn đúng cách làm sai này.
+- `reporting/composer.py` — card + brief. `assert_claim_ceiling` chặn **từ ngữ** vượt trần tầng (docs/15 §4): card claim `measurement` nên "IP dự kiến giảm" bị chặn — không số nào sai, chỉ một động từ nhảy mức nhận dạng.
+
 - `econometrics/panel_var.py` — **block-exogenous VAR + Granger test khối** (docs/11 §5.5): nền hình thức cho #8. `granger_block_test(H0: Z↛X)` — không bác bỏ → kiến trúc engine+params hợp lệ cho nước c. Kiểm định GIẢ ĐỊNH, không phải IRF. VN thật cần r^c (VN-Index) + p (chính sách) chờ đường nối BeaverX.
 
 **Outcome vĩ mô thực (docs/14 M0):** `data_files.load_real_macro_monthly` + `transform_real_macro` → `ip`/`cpi`/`infl_exp`. Vào track THÁNG qua `build_monthly_panel(real_macro=True)`. `ip = 100·Δln(INDPRO)` khớp E0; `infl_exp` đi **sai phân** (mức khảo sát dai dẳng, #9). INDPRO/CPI **revise hồi tố** → ghi `real_macro_vintage()` vào metadata report; backtest point-in-time phải qua ALFRED vintage, bản FRED là vintage mới nhất.

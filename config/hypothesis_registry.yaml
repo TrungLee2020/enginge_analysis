@@ -52,6 +52,88 @@ ar_persistent_spec:
   robustness_checked: true
 
 # ---------------------------------------------------------------------------
+# QUYẾT ĐỊNH GOVERNANCE ĐÃ CHỐT (bản chữ ký đầy đủ ở g0_governance.md / docs/14 §6)
+# ---------------------------------------------------------------------------
+decisions:
+  - id: DEC-2026-08-02-shock-axis          # g0 §7.1 = A
+    decided: "2026-08-02"
+    by: "user (ủy quyền theo khuyến nghị đã ghi, phiên 2026-08-02)"
+    what: >
+      SHOCK làm TRỤC BÁO CÁO cho bảng γ mô tả: chạy cả {LEVEL, INNOVATION,
+      LEVEL+JUMP}, báo cáo hết, không chọn. primary_cell.shock của SCA-01 vẫn
+      UNRESOLVED (chờ E1c-exo). KHÔNG đụng CLAUDE.md #9.
+    machine_gate: >
+      LEVEL/LEVEL+JUMP chỉ eligible khi inference=lag_augmented (MO-PM 2021
+      partial-out phần dự báo được của level ngay trong hồi quy); INNOVATION
+      eligible với mọi chế độ. Mã hóa ở scripts/run_tier2.py:gate_shock_eligibility
+      — sửa cổng và mục này phải CÙNG COMMIT.
+  - id: DEC-2026-08-02-holm-family         # docs/14 §6.6 = B
+    decided: "2026-08-02"
+    by: "user (ủy quyền, phiên 2026-08-02)"
+    what: >
+      Họ kiểm định của bảng γ = nhóm outcome đã pre-register ở
+      SCA-01.report_axis_outcome (asset_price 4 / real_macro 3 / physical 1).
+      Holm trong họ (multiplicity.holm_by_family), kiểm tại focal horizons đã
+      pre-register; ghi chú conservative khi outcome tương quan mạnh.
+  - id: DEC-2026-08-02-chanb-window        # g0 §7.2 = (i)+(ii)
+    decided: "2026-08-02"
+    by: "user (ủy quyền, phiên 2026-08-02)"
+    what: >
+      KĐ8 đánh ở tần suất daily/weekly; 2024–2025 = development window chân B;
+      trần claim chân B v1 = "predictive, chưa xác nhận holdout". Scorer
+      track-record dùng model local pin cứng.
+  - id: DEC-2026-08-02-sources-trading     # docs/14 §6.1 + §6.3
+    decided: "2026-08-02"
+    by: "user (ủy quyền, phiên 2026-08-02)"
+    what: >
+      2 nguồn đầu chân B = Trump (B4) + MOFA CN (B5). Bỏ tín hiệu giao dịch
+      (backtest.yaml ngủ đông, split 4 tầng vẫn hiệu lực track E). §6.2 (người
+      chấm thứ hai) VẪN MỞ — cần con người, không ủy quyền máy được.
+
+  - id: DEC-2026-08-03-dual-component      # docs/16 §2.2 + §9.1
+    decided: "2026-08-03"
+    by: "user (chỉ đạo 'fix từng bước rồi triển khai', phiên 2026-08-03)"
+    status: partial                        # phần code xong; phần chốt ô chính CHƯA
+    what: >
+      Spec kép (docs/16 §2.2): Δ LEVEL tách thành ANTICIPATED + SURPRISE, đưa CẢ
+      HAI vào cùng hồi quy thay vì chọn một thước đo. Code: shocks.delta_decomposition
+      (SURPRISE ≡ innovation() đã có; hai thành phần cộng lại bằng ĐÚNG Δ LEVEL).
+    amends: DEC-2026-08-02-shock-axis
+    amends_detail: >
+      SỬA: trục SHOCK {LEVEL, INNOVATION, LEVEL+JUMP} chuyển từ trục báo cáo CHÍNH
+      xuống ROBUSTNESS khi spec kép chạy được trên AI-GPR.
+      GIỮ NGUYÊN: điều kiện LEVEL/LEVEL+JUMP chỉ eligible với lag_augmented
+      (shock_axis.gate_shock_eligibility) vẫn còn hiệu lực nguyên vẹn.
+    conditions:
+      - "Đóng góp hai thành phần báo cáo CHUẨN HÓA (β×sd), KHÔNG phải hệ số thô —
+         Var(ANTICIPATED)/Var(SURPRISE) ~0.1 nên hệ số thô không so được.
+         Bằng chứng: docs/reports/E2_component_decomposition_e73a0a307fc3.md
+         (48.9% ô đảo chiều kết luận sau chuẩn hóa)."
+      - "β_ANTICIPATED phải gọi là 'phản ứng với thành phần đã dự báo được'.
+         Gọi là 'tác động của cú sốc' vi phạm #9. Cổng máy:
+         shock_axis.check_component_labelling."
+    not_yet_decided: >
+      SCA-01.primary_cell.shock VẪN LÀ UNRESOLVED. docs/16 §2.2 đề xuất chốt ô
+      chính bằng spec kép, nhưng làm thế là chốt bằng THIẾT KẾ chứ không bằng
+      E1c-exo — đúng thứ mà việc để UNRESOLVED sinh ra để tránh. Chốt ô chính là
+      quyết định RIÊNG, chưa ký, cần chữ ký mới khi có dữ liệu AI-GPR.
+    blocked_by: ai_gpr_data_unverified
+
+# Dữ liệu còn thiếu chặn các nhánh (docs/14 §2 1c) — KHÔNG phải việc code:
+data_blockers:
+  ai_gpr_data_unverified: >
+    data/ai_gpr_daily.csv — TẢI TAY từ matteoiacoviello.com/ai_gpr.html (docs/16 §1).
+    CHƯA ai tải, nên `AI_GPR_COLUMNS` trong data_files.py là schema GIẢ ĐỊNH theo
+    mô tả docs/16 §1, chưa đối chiếu file thật (dùng describe_ai_gpr_file()). Rủi
+    ro chưa xác minh: nếu trang chỉ có một file "latest" bị ghi đè mỗi kỳ cập nhật
+    thì không ghim vintage được và report chạy trên nó mất tái lập (#4). Chặn:
+    §9 Phase 1 (recalibrate JUMP, battery AI-GPR, spec kép chạy thật, tier3 VN daily).
+  gold_events_csv: "data/gold_events.csv — 2 người dựng tay, KHÔNG tra GPRD (chặn E1c-exo → primary_cell.shock)"
+  wui_global_csv: "data/wui_global.csv — tải tay; battery thiếu WUI thì report ghi rõ"
+  vn_market_series_missing: "VNINDEX daily — đường nối BeaverX (chặn M3/tier3 VN)"
+  pilot_market_series_missing: "WIG/IPSA cho nước pilot 1b — không có trên FRED, cần chốt nguồn"
+
+# ---------------------------------------------------------------------------
 # GIẢ THUYẾT ĐĂNG KÝ
 # ---------------------------------------------------------------------------
 hypotheses:
@@ -239,6 +321,12 @@ specification_curves:
     # (docs/reports/E0_alignment_diagnostic_e73a0a307fc3_c93a877.md), holdout ghi g0 §2.
     # docs/13 phát hiện E1b bị bác → cổng mới G-Gold/G-E1c/G-Primary trước khi chạy.
     blockers: [E1c_endo_rerun, gold_events_csv, E1c_exo, primary_cell_shock_resolved]
+    # docs/14 §2 mục 1c (2026-08-02): lưới SCA hạ xuống REFINEMENT, KHÔNG chặn
+    # launch. Lý do: bảng γ mô tả (Phase 1a, T2_full) đã tồn tại và trả lời được
+    # câu hỏi sản phẩm; curve suy diễn là tăng cường độ chắc chắn, không phải điều
+    # kiện để có sản phẩm. Blockers ở trên VẪN nguyên — hạ ưu tiên KHÔNG phải gỡ cổng.
+    phase: refinement
+    blocking_launch: false
     commitment: >
       Báo cáo TOÀN BỘ đường cong bất kể kết quả. Không ô nào bị loại khỏi report
       sau khi đã chạy. Không chạm holdout.

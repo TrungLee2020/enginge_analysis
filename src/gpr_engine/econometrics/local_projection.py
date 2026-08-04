@@ -54,9 +54,17 @@ Omega uoc luong bang HAM ANH HUONG (influence function), khong bootstrap:
 Duong cheo cua ma tran nay CHINH LA HC0 (HC1 sau hieu chinh n/(n-k)) — nen SE
 pointwise va dai sup-t den tu CUNG MOT nguon, khong the ton tai hai bo so lech
 nhau trong cung mot report. `test_supt_diagonal_matches_hc1` khoa dieu do.
+
+    ⚠️ HE QUA: simultaneous=True CHI hop le voi inference="lag_augmented".
+    Omega luon uoc luong bang ham anh huong EHW; ghep no voi `se` HAC thi dai
+    sup-t = beta ± c·se_HAC lay hang so c tu MOT ma tran hiep phuong sai va do
+    rong tu MOT ma tran khac — dung cai loi ma test tren sinh ra de chan, chi
+    khac la no lot qua duoc vi hai nguon o hai dong code. Ham RAISE thay vi tra
+    dai sai (docs/15 §5 muc 4).
 """
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable
 
 import numpy as np
@@ -112,6 +120,24 @@ def _supt_critical_value(
     return c, omega
 
 
+def _supt_from_psis(
+    per_h: dict[int, pd.Series], ci: float, n_sim: int, seed: int,
+) -> float:
+    """Hang so c cua dai sup-t cho MOT he so, tu ham anh huong theo horizon.
+
+    Cov(beta_h, beta_k) = sum_{t chung} psi_{h,t}·psi_{k,t} — chi cong tren cac t
+    co mat o CA hai horizon (mau khac nhau vi y_{t+h} cat duoi khac nhau).
+    """
+    hs = sorted(per_h)
+    cov = np.full((len(hs), len(hs)), np.nan)
+    for a, ha in enumerate(hs):
+        for b, hb in enumerate(hs):
+            pa, pb = per_h[ha].align(per_h[hb], join="inner")
+            cov[a, b] = float((pa * pb).sum())
+    c, _ = _supt_critical_value(cov, ci, n_sim, seed)
+    return c
+
+
 def _add_lags(work: pd.DataFrame, cols: Iterable[str], lags: int) -> list[str]:
     """Them cot lag 1..lags cho `cols` vao `work` (in-place). Tra ten cot moi."""
     made = []
@@ -159,7 +185,9 @@ def run_local_projection(
     lags : so lag cho lag augmentation. Nen dat p+1 voi p la bac AR cua chuoi.
         Chi co tac dung khi inference="lag_augmented".
     simultaneous : True -> them cot `ci_low_supt`/`ci_high_supt` (dai sup-t
-        MO-PM 2019) va `supt_c` (hang so). CHI ho tro method="ols".
+        MO-PM 2019) va `supt_c` (hang so). CHI ho tro method="ols" VA
+        inference="lag_augmented" (Omega la EHW — ghep voi se HAC la tron hai bo
+        sai so chuan). Voi return_all=True: mot `supt_c` RIENG cho moi he so.
     method : "ols" | "quantile" (hoi quy phan vi tai `tau`).
     tau : phan vi cho method="quantile" (0<tau<1).
     n_sim, seed : mo phong sup-t. `seed` co dinh de con so tai lap duoc.
@@ -168,7 +196,8 @@ def run_local_projection(
     -------
     return_all=False: DataFrame index=horizon, cot beta/se/tstat/pvalue/
         ci_low/ci_high/nobs (+ ci_low_supt/ci_high_supt/supt_c neu simultaneous).
-    return_all=True : DataFrame long [horizon, term, beta, se, ...].
+    return_all=True : DataFrame long [horizon, term, beta, se, ...] (+ ba cot
+        sup-t neu simultaneous, `supt_c` khac nhau theo term).
 
     Notes
     -----
@@ -191,6 +220,15 @@ def run_local_projection(
             "uoc luong sparsity tai tau, kem on dinh o duoi. Duong dung la bootstrap "
             "(M10, dung `arch`). Chay simultaneous=False roi bao cao dai pointwise "
             "KEM canh bao boi, dung tra dai sup-t sai.")
+    if simultaneous and inference != "lag_augmented":
+        raise ValueError(
+            "simultaneous=True chi hop le voi inference='lag_augmented'. Hang so c "
+            "cua dai sup-t uoc luong tu ma tran hiep phuong sai EHW (ham anh huong), "
+            f"nhung inference={inference!r} cho `se` HAC -> dai beta ± c·se_HAC tron "
+            "hai bo sai so chuan khac nhau trong cung mot dong. Dung "
+            "inference='lag_augmented' (dung spec da pre-register o "
+            "SCA-01.lp_inference), hoac simultaneous=False neu that su muon HAC "
+            "pointwise.")
 
     controls = list(controls)
     horizons = list(horizons)
@@ -217,24 +255,36 @@ def run_local_projection(
         hac_maxlags = max(horizons) if horizons else 0
 
     z = norm.ppf(0.5 + ci / 2.0)
-    j_shock = 1 + x_cols.index(shock)           # +1 vi cot const dung dau
 
     rows: dict[int, dict] = {}
     long_rows: list[dict] = []
-    psis: dict[int, pd.Series] = {}
+    # term -> {horizon -> psi}. return_all=True can dai cho MOI he so (tang 3 doc
+    # ca beta/theta/lambda theo horizon), khong chi cho `shock`.
+    psis: dict[str, dict[int, pd.Series]] = {}
+    supt_terms = list(x_cols) if return_all else [shock]
 
     for h in horizons:
         y_h = base[y].shift(-h)
         data = pd.concat([y_h.rename("__y__"), base[x_cols]], axis=1).dropna()
         if len(data) <= len(x_cols) + 1:
             rows[h] = dict(beta=np.nan, se=np.nan, tstat=np.nan, pvalue=np.nan,
-                           ci_low=np.nan, ci_high=np.nan, nobs=len(data))
+                           ci_low=np.nan, ci_high=np.nan, nobs=len(data),
+                           converged=False)
             continue
 
         Xc = sm.add_constant(data[x_cols], has_constant="add")
 
+        converged = True
         if method == "quantile":
-            res = sm.QuantReg(data["__y__"], Xc).fit(q=tau)
+            # QuantReg dung IRLS; khong hoi tu thi statsmodels chi WARN roi tra
+            # he so cua vong lap cuoi. Warning bay len stderr va bien mat, con so
+            # thi di thang vao report — dung loai loi im lang nguy hiem nhat.
+            # Bat lai thanh CO tren tung hang de report dem duoc.
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                res = sm.QuantReg(data["__y__"], Xc).fit(q=tau)
+            converged = not any("Maximum number of iterations" in str(w.message)
+                                for w in caught)
         elif inference == "lag_augmented":
             # EHW/HC1 — KHONG HAC. Xem docstring module.
             res = sm.OLS(data["__y__"], Xc).fit(cov_type="HC1")
@@ -248,13 +298,14 @@ def run_local_projection(
             beta=beta, se=se,
             tstat=res.tvalues[shock], pvalue=res.pvalues[shock],
             ci_low=beta - z * se, ci_high=beta + z * se,
-            nobs=int(res.nobs),
+            nobs=int(res.nobs), converged=converged,
         )
         if simultaneous:
-            psis[h] = pd.Series(
-                _influence(np.asarray(Xc, dtype=float),
-                           np.asarray(res.resid, dtype=float), j_shock),
-                index=data.index)
+            Xa = np.asarray(Xc, dtype=float)
+            ra = np.asarray(res.resid, dtype=float)
+            for term in supt_terms:
+                psis.setdefault(term, {})[h] = pd.Series(
+                    _influence(Xa, ra, 1 + x_cols.index(term)), index=data.index)
         if return_all:
             for term in x_cols:
                 b, s = res.params[term], res.bse[term]
@@ -262,25 +313,31 @@ def run_local_projection(
                     horizon=h, term=term, beta=b, se=s,
                     tstat=res.tvalues[term], pvalue=res.pvalues[term],
                     ci_low=b - z * s, ci_high=b + z * s, nobs=int(res.nobs),
+                    converged=converged,
                 ))
 
     if return_all:
-        return pd.DataFrame(long_rows, columns=[
+        out = pd.DataFrame(long_rows, columns=[
             "horizon", "term", "beta", "se", "tstat", "pvalue",
-            "ci_low", "ci_high", "nobs"])
+            "ci_low", "ci_high", "nobs", "converged"])
+        if simultaneous:
+            # Mot hang so c RIENG cho moi he so: dai sup-t bao phu duong IRF cua
+            # he so DO qua horizon. Dung chung mot c cho ca beta/theta/lambda la
+            # sai — chung co ma tran tuong quan qua horizon khac nhau.
+            cs = {t: _supt_from_psis(per_h, ci, n_sim, seed)
+                  for t, per_h in psis.items()}
+            out["supt_c"] = out["term"].map(cs)
+            out["ci_low_supt"] = out["beta"] - out["supt_c"] * out["se"]
+            out["ci_high_supt"] = out["beta"] + out["supt_c"] * out["se"]
+        return out
 
     out = pd.DataFrame.from_dict(rows, orient="index")
     out.index.name = "horizon"
-    cols = ["beta", "se", "tstat", "pvalue", "ci_low", "ci_high", "nobs"]
+    cols = ["beta", "se", "tstat", "pvalue", "ci_low", "ci_high", "nobs",
+            "converged"]
 
     if simultaneous:
-        hs = [h for h in horizons if h in psis]
-        cov = np.full((len(hs), len(hs)), np.nan)
-        for a, ha in enumerate(hs):
-            for b, hb in enumerate(hs):
-                pa, pb = psis[ha].align(psis[hb], join="inner")
-                cov[a, b] = float((pa * pb).sum())
-        c, _ = _supt_critical_value(cov, ci, n_sim, seed)
+        c = _supt_from_psis(psis[shock], ci, n_sim, seed)
         out["supt_c"] = c
         out["ci_low_supt"] = out["beta"] - c * out["se"]
         out["ci_high_supt"] = out["beta"] + c * out["se"]

@@ -45,14 +45,14 @@ Hai deliverable: **Global Macro Impact** (generic) · **Country Transmission** (
 | M0 | ✅ **Outcome vĩ mô thực** (IP/CPI/kỳ vọng lạm phát) — XONG 2026-07-21 | — |
 | M8 | ✅ **LP lag-augmented + SE White + dải sup-t** — XONG 2026-07-21 | — |
 | M9 | ✅ **Quantile regression** (`method="quantile"`, τ bất kỳ) — XONG 2026-07-21 | — |
-| M10 | **Kế hoạch bội.** `arch` chưa import ở đâu. ⚠️ **Phạm vi đã thu nhỏ nhiều nhờ M8** — xem §1.3 | định nghĩa "họ kiểm định" (§6.6) |
-| M1 | Bảng γ thật (tier2 tháng đầy đủ chưa từng chạy) | M10 |
+| M10 | ✅ **Holm giữa outcome** — XONG 2026-08-02 (`multiplicity.py`). Thủ tục đã có; **chọn HỌ** vẫn chờ §6.6 (`family` không có mặc định — có chủ đích) | — (phần code); §6.6 cho phần chữ ký |
+| M1 | ✅ **Bảng γ thật** — XONG 2026-08-02, `docs/reports/T2_full_f2579b30928f.md` (n=231 tháng, 3600 hàng γ). Chờ **human review** | — |
 | M2 | Bộ β/θ/λ đầu tiên (tier3 chưa từng chạy dữ liệu thật) | nước pilot (không phải VN) |
 | M3 | β/θ/λ cho VN | `VNINDEX` — đường nối BeaverX. Registry: thêm `vn_market_series_missing` |
 | M4 | Chân B: collector + scorer + S-GPR + ladder | 2 quyết định §6 |
-| M5 | Analogue retrieval | M1 |
-| M6 | Composer + guard P1 + serving | M4, M5 |
-| M7 | Track record harness (CRPS/Brier) | M6 |
+| M5 | ✅ **Analogue retrieval** — XONG 2026-08-03 (`econometrics/analogue.py`). Bốn ràng buộc docs/11 §6 đều là **cơ chế**, không phải lời hứa | — |
+| M6 | ✅ **Composer + guard P1** — XONG 2026-08-03 (`reporting/{guard,composer}.py`). Serving còn lại ở 3c | serving: chờ đường nối BeaverX |
+| M7 | Track record harness (CRPS/Brier) | M6 ✅ → làm được |
 
 ---
 
@@ -158,8 +158,11 @@ Cũ: "S-GPR có dẫn trước GPR không". Mới: **"S-GPR có thêm thông tin
 §6.1–6.3 chặn **Phase 2**. §6.4 chặn **Phase 1a + 1c** (gấp hơn). §6.5 chặn **2c**. §6.4 và §6.5 ghi song song ở `g0_governance.md` §7 — đó là bản có ô ký chốt.
 
 1. **2 nguồn đầu:** đề xuất Trump + MOFA CN (trục Mỹ–Trung/thương mại — kênh chi phối VN). Đổi MOFA → Fed nếu ưu tiên trục lãi suất.
+   **✅ CHỐT 2026-08-02 (user ủy quyền): Trump (Truth Social/Twitter Archive, B4) + MOFA CN (B5)** — theo đề xuất; trục Mỹ–Trung/thương mại là kênh chi phối VN.
 2. **Người chấm mẫu thứ hai** (500 mẫu, độc lập) — không có thì không claim được `measurement`.
+   **⏳ VẪN MỞ** — cần một CON NGƯỜI thật, không ủy quyền cho máy được. Đây là blocker Phase-2 duy nhất còn lại về phía nhân sự; scorer/module đã sẵn.
 3. Xác nhận: bỏ tín hiệu giao dịch (coi như chốt trừ khi bạn đảo) — `config/backtest.yaml` đánh dấu ngủ đông, ghi chú split 4 tầng vẫn hiệu lực cho track E.
+   **✅ CHỐT 2026-08-02: bỏ tín hiệu giao dịch.** Không sửa `config/backtest.yaml` (bị test khóa; split 4 tầng vẫn hiệu lực cho track E) — trạng thái ngủ đông ghi ở đây + `g0` §2 là đủ.
 
 ### 6.4. SHOCK mặc định — LEVEL, hay để làm trục? (mới v1.2, **chặn 1a + 1c**)
 
@@ -194,7 +197,7 @@ Sau khi sup-t nuốt chiều horizon (§1.3), chỉ còn hiệu chỉnh giữa *
 
 **Khuyến nghị: B.** `SCA-01.report_axis_outcome` đã chia ba nhóm đó **trước khi nhìn kết quả** và lý do chia là kinh tế (giá tài sản phản ứng theo phút, vĩ mô thực theo quý) chứ không phải để dễ qua ngưỡng. Dùng lại ranh giới đã pre-register là cách duy nhất không tự chọn họ sau khi thấy p-value.
 
-**Chốt:** _chưa điền_ · **Người:** _chưa điền_ · **Ngày:** _chưa điền_
+**Chốt: B** · **Người:** user (ủy quyền, phiên 2026-08-02) · **Ngày:** 2026-08-02 · Họ = `multiplicity.PREREGISTERED_OUTCOME_FAMILIES` (4/3/1, lấy nguyên văn từ `SCA-01.report_axis_outcome`); Holm trong họ, ghi chú conservative khi outcome tương quan mạnh; kiểm tại **focal horizons đã pre-register** ({1,2,6} tháng), không quét horizon (sup-t đã lo chiều đó).
 
 ---
 
@@ -229,4 +232,67 @@ Một phát ngôn thật lúc 14:07 → Measurement Card 14:10. Cuối tháng �
 - `method="quantile"` — τ bất kỳ. `simultaneous=True` + quantile → **NotImplementedError** thay vì trả dải sai: hàm ảnh hưởng của QuantReg cần ước lượng sparsity tại τ, dùng công thức OLS ở đó sẽ cho dải sai mà không phát hiện được. Đường đúng là bootstrap, để M10.
 - 💡 **Phát hiện làm nhỏ M10:** sup-t đã xử lý xong chiều horizon (×25, chiều bội lớn nhất). M10 chỉ còn hiệu chỉnh giữa outcome — xem §1.3.
 
-**Chưa làm, theo thứ tự:** M10 (Holm giữa outcome — chờ §6.6) → 1a (chờ §6.4).
+**2026-08-02 — M10 + NỐI M8/M9 vào cascade** (`multiplicity.py`, `local_projection.py`, `tier2_global_macro.py`, `tier3_country.py`, 2 file test mới):
+
+- **M10 xong ở phần KHÔNG chờ chữ ký.** `econometrics/multiplicity.py`: `holm()` (step-down, FWER dưới phụ thuộc **bất kỳ** — không giả định gì, không cần bootstrap) + `holm_by_family()`. `PREREGISTERED_OUTCOME_FAMILIES` = đúng ba nhóm `SCA-01.report_axis_outcome` (4/3/1), để **sẵn** cho lựa chọn B nhưng **KHÔNG phải mặc định**: `family` là tham số bắt buộc. Chọn họ sau khi nhìn p-value chính là HARKing mà registry sinh ra để chặn, nên chữ ký §6.6 vẫn là thứ mở khóa, không phải code.
+  - Không dùng `arch`/SPA/StepM: chúng dựng cho so nhiều **chiến lược** với một benchmark và cần bootstrap ma trận lỗi. Ở đây m=3..8 và cái cần là FWER không giả định phụ thuộc. Holm conservative khi outcome tương quan mạnh (oil/dxy/vix/us10y chắc chắn có) — **đánh đổi đã biết, ghi vào report**, không đổi sang thủ tục lỏng hơn sau khi thấy p-value.
+  - Test khóa: họ phải **phân hoạch** + **phủ hết** (bỏ im lặng một outcome = làm nhẹ FWER mà report không ghi); B phải lỏng hơn C, nếu không thì §6.6 không phải một quyết định.
+
+- **⛔ Phát hiện chặn 1a mà v1.2 §1.1 chưa ghi: M8/M9 KHÔNG với tới được từ cascade.** `estimate_tier2`/`estimate_tier3` gọi `run_local_projection` mà không truyền `inference`/`simultaneous`/`method`/`tau`/`lags`, và `estimate_tier2` lọc cột đầu ra bằng danh sách cứng nên nuốt luôn cột sup-t. Tức là bảng γ 1a chỉ chạy được bằng **đúng cái inference mà `SCA-01.lp_inference` nói là sai** — M8/M9 tồn tại ở mức hàm nguyên thủy nhưng chết ở mức deliverable. **Đã nối**, mặc định giữ nguyên `hac`/OLS/không sup-t nên report cũ không đổi.
+  - Kèm cổng: `inference="lag_augmented"` + `macro_lags>0` → **raise**. Lag augmentation tự thêm lag của y (=M); giữ `macro_lags` sinh cột lag **trùng khít**, `pinv` không báo lỗi mà chia đôi hệ số giữa hai cột giống hệt nhau và SE mất nghĩa — hỏng im lặng, đúng loại lỗi khó thấy nhất trong report.
+
+- **Hai lỗ im lặng trong khối sup-t, sửa luôn:**
+  1. `simultaneous=True` + `inference="hac"` **chạy được** và trả `beta ± c·se_HAC` — hằng số `c` lấy từ ma trận hiệp phương sai EHW, độ rộng lấy từ SE HAC. Đúng cái lỗi "hai bộ SE trong một report" mà `test_supt_diagonal_matches_hc1` sinh ra để chặn, chỉ khác là nó lọt vì hai nguồn nằm ở hai dòng code. Giờ **raise** (docs/15 §5 mục 4 — nhưng nó là lỗi đúng/sai, không phải "1 dòng guard").
+  2. `simultaneous=True` + `return_all=True` **tính psi xong rồi vứt**: nhánh `return_all` return trước khối sup-t. Đó chính là đường tầng 3 đi. Giờ trả dải cho **mọi** hệ số, mỗi hệ số một `supt_c` **riêng** — β/θ/λ có ma trận tương quan qua horizon khác nhau, dùng chung một hằng số là áp đặc tính hệ số này lên hệ số kia.
+
+**2026-08-02 (chiều) — M4 phần MODULE: chân B hết stub trên đường LLM** (`statement_scorer.py`, `s_gpr.py`, `ladder.py`, `config/ladder_v1.yaml`, 40 test mới, 182 pass):
+
+- `scoring/statement_scorer.py` — pipeline 2 tầng ECB (encoder tiêm vào, ngưỡng 0.6 → LLM temp 0.1, **JSON strict**: sai key/miền/kiểu là từ chối, không sửa hộ — LLM sinh số ngoài schema bị chặn từ parse). Prompt = rubric docs/00 §2.3 + **quy tắc contamination §3.1.1 viết thẳng vào prompt**; `training_cutoff` là tham số **bắt buộc** (§3.1.4). Versioning 5 trục (model/rubric/prompt/temperature/content-hash) vào từng hàng điểm; cache theo hash — đổi trục nào điểm cũ tự vô hiệu. Actor lấy từ **metadata nguồn**, LLM chỉ fallback (docs/00 §2.1). Guard #5: nguồn daily mà `published_at` đúng 00:00:00 → raise (cột date bị ép kiểu). Client OpenAI lười-import; test toàn fake, không mạng.
+- `indices/s_gpr.py` — công thức §2.5 nguyên văn: hai chiều S-GPR/S-CONC **không net**; `w(role)` = `DEFAULT_ROLE_WEIGHTS_INIT` (đúng nghĩa INIT, #7 — role lạ raise chứ không gán ngầm); chuẩn hóa nhịp đăng nguồn; global **bắt buộc** trade_weights phủ hết pair. `expanding_percentile` **strict `<`** — định nghĩa `<=` trên chuỗi zero-inflated (JUMP) cho ngày im ắng percentile ~100, trigger nổ mỗi ngày; test khóa.
+- `econometrics/ladder.py` + `config/ladder_v1.yaml` — V1 rule-based, ngưỡng **trong config version-hóa** (đổi ngưỡng = version mới), `config_version` theo từng hàng. NaN = không thỏa (thiếu bằng chứng thì không leo bậc). Chưa có GDELT: S4 vẫn bắt qua JUMP chân A (`mode: any`), **S2 không bắt được** — ghi trong config thay vì hạ ngưỡng. S1/S3 chưa có ngưỡng trong docs/00 §4.1 — chờ chốt, không tự bịa. `ladder_transitions` = trigger "chuyển bậc" cho tầng 4.
+- Test tích hợp `test_chain_b_pipeline.py`: tái hiện ví dụ docs/15 §2 (Trump 14:07) — phát ngôn → điểm → S-GPR 7d (=0.782 tính tay) → percentile → S4 + trigger up; mọi số trong payload truy về hàm+input.
+- ⚠️ Phát hiện ghi `docs/15` §6.2b: **hai taxonomy kênh chỏi nhau** (docs/00 6 kênh vs docs/14+15 "4 kênh"); mapping 6→4 chỉ điền cặp hiển nhiên, còn lại `None` chờ chốt.
+
+**2026-08-02 (tối) — KÝ 4 QUYẾT ĐỊNH + M1: BẢNG γ ĐẦU TIÊN TỒN TẠI** (`shock_axis.py`, `run_t2_full.py`, registry `decisions`, 193 test):
+
+- **Chữ ký** (user ủy quyền theo đúng khuyến nghị đã ghi sẵn, không thêm quyết định mới): §6.4/`g0` §7.1 → **A** · §6.6 → **B** · `g0` §7.2 → **(i)+(ii)** · §6.1 → **Trump + MOFA CN** · §6.3 → **bỏ tín hiệu giao dịch**. Ghi `decisions:` trong registry + khóa máy (`test_signed_decisions_locked`) — rút lại chữ ký cũng phải đi qua commit có chủ đích. §6.2 (người chấm thứ hai) **vẫn mở** — cần con người.
+- **`econometrics/shock_axis.py`** — cổng máy của quyết định A: `gate_shock_eligibility(measure, inference)`. LEVEL/LEVEL+JUMP **chỉ eligible với `lag_augmented`**; đó là điều kiện làm A không phá #9 (lag augmentation partial-out phần dự báo được ngay trong hồi quy → hệ số đọc được là phản ứng với phần *bất ngờ*). `run_tier2.GATE_ELIGIBLE_SHOCK_TYPES` giờ **sinh ra từ cổng** thay vì gõ tay — vẫn `{"innovation"}` vì runner đó chạy `hac`, nên report cũ không đổi.
+- **`data_files`: trục SHOCK ở track tháng** — `build_monthly_shock_axis()` + `build_monthly_panel(shock_axis=True, components=True)`. Thêm GPRA/GPRT → `GPR_ACT`/`GPR_THREAT` (tách kênh thô giai đoạn 1, không cần chân B). JUMP tháng dùng cửa sổ **120 tháng** (min_periods 60): chuyển 250-phiên-daily thành 12 tháng là vô nghĩa — q95 trên 12 điểm gần như là max.
+- **`scripts/run_t2_full.py` — Phase 1a chạy xong.** → `docs/reports/T2_full_f2579b30928f.md`. 3 thước đo × 3 kênh × 8 outcome × 2 bản battery × h=0..24 = **3600 hàng γ**, + 6000 hàng phân vị. Battery **đồng thước đo** với shock (ràng buộc §2 1a #2: EPU đi qua chính `build_monthly_shock_axis`, không so LEVEL-control với INNOVATION-shock).
+
+  **⛔ Chi phí mẫu, phải biết trước khi đọc:** một mẫu duy nhất 2007-02 → 2026-06, **n=231 tháng**. LEVEL+JUMP ăn 120 tháng warmup, EPU global chỉ từ 1997 → giao là 2007. Đây là giá của việc bắt bản a/b **và** ba thước đo so được với nhau; trộn mẫu thì "hệ số yếu đi khi thêm control" có thể chỉ là đổi mẫu.
+
+  **Kết quả (chưa human review):** 432 kiểm định focal, 34 có p thô <0.10, **15 sống sót Holm** (bản b: 9). Sống sót tập trung ở **vĩ mô thực + kênh vật lý**; **giá tài sản 0/4 ở cả ba thước đo**. Ô đồng thuận cả ba thước đo: **GPR_ACT → IP, h=2, dấu âm** (LEVEL β=−0.77 p=0.017 · INNOVATION β=−0.74 p=0.017 · LEVEL+JUMP β=−0.11 p=0.031), sống sót battery. Đó là **cùng hiện tượng E0 replication** (C-I 2022: GPR→IP giảm h=1,2) nhưng trên mẫu khác, suy diễn khác, và giờ biết là **ACT chứ không phải THREAT**.
+- **Lỗ im lặng thứ ba đã bịt:** QuantReg (IRLS) không hội tụ thì statsmodels chỉ `warn` rồi **trả hệ số vòng lặp cuối** — số chạy thẳng vào bảng, warning bay lên stderr rồi mất. `run_local_projection` giờ bắt lại thành cột `converged`; **386/6000** hàng phân vị rơi vào đó, bảng in `‡` thay vì số.
+- **1c registry:** SCA-01 thêm `phase: refinement, blocking_launch: false` (blockers giữ nguyên — hạ ưu tiên KHÔNG phải gỡ cổng); thêm `data_blockers` (gold_events, wui_global, vn/pilot market series).
+
+**2026-08-03 — AI-GPR xuất hiện (`docs/16`); phản biện §2.1 + spec kép + loader** (`run_e2_component_check.py`, `shocks.delta_decomposition`, `shock_axis`, `data_files.load_ai_gpr_daily`, 216 test):
+
+- **`docs/16` §2.1 tự đính chính sau khi kiểm bằng dữ liệu của dự án.** Doc lập luận: bài AI-GPR thấy hệ số phần *persistent* lớn gấp đôi phần *shock*, nên lag-augmented LP (và `INNOVATION`) chỉ bắt được "nửa yếu". E2 (`docs/reports/E2_component_decomposition_e73a0a307fc3.md`) tách rõ hai chuyện:
+  - **Cơ chế ĐÚNG, đã tái lập:** dưới lag augmentation, `corr(β_LEVEL, β_INNOVATION) = 0.9985` — LEVEL bị residual hóa thành đúng phần bất ngờ (FWL), hai cái gần như là một.
+  - **Kết luận định lượng KHÔNG đứng:** hai hệ số nằm trên hai regressor có `Var(fitted)/Var(resid) ≈ 0.11` nên **không so được ở dạng thô**. Chuẩn hóa (β×sd) thì thứ tự **đảo** ở ô chính, và **22/45 ô (48.9%)** đảo chiều kết luận. Cùng tai nạn thang đo mà registry đã ghi cho `LEVEL+JUMP`.
+  - **Hệ quả:** câu "dùng INNOVATION nên G2a mới yếu" không đứng — trong `T2_full`, LEVEL cũng cho **0/4 giá tài sản** y hệt, vì dưới lag-aug hai cái là một.
+  - ⚠️ E2 chạy GPRD **tháng**, bài chạy AI-GPR **tuần** (dai hơn → R² cao hơn → có thể không đảo). E2 bác **cách đọc bảng khi chưa chuẩn hóa**, không bác số của bài.
+- **Spec kép §2.2 sống sót nguyên vẹn — nó là lối ra đúng**, vì giải tán luôn câu hỏi "thành phần nào mạnh hơn". `shocks.delta_decomposition`: `Δ LEVEL = ANTICIPATED + SURPRISE`, trong đó **SURPRISE ≡ `innovation()` đã có** (vì `Ê[Δlevel] = Ê[level] − level₋₁`), nên ANTICIPATED lấy bằng hiệu → hai thành phần cộng lại bằng **đúng** Δ LEVEL theo đồng nhất thức, không thể lệch do hai đường ước lượng. Phân rã trên **sai phân** chứ không trên mức (`persistent_ar` = Ê[LEVEL] gần nghiệm đơn vị — đưa vào hồi quy là quay lại đúng vấn đề #9).
+- **Cổng NHÃN** (`shock_axis.check_component_labelling`): spec kép không phá #9 nhờ *cách gọi tên*, không nhờ công thức. Gọi β_ANTICIPATED là "cú sốc" → raise. Guard P1 cho **nhãn** thay vì cho **số**.
+- **`load_ai_gpr_daily()`** theo khuôn file tải tay: thiếu file → lỗi kèm hướng dẫn + lý do không tự fetch (#4); thiếu cột → raise (thiếu threats/acts mà bỏ qua thì mọi tách ACT/THREAT sau đó chạy trên dữ liệu rỗng). `AI_GPR_COLUMNS` là schema **giả định**, `describe_ai_gpr_file()` để đối chiếu lần tải đầu.
+- **Governance:** `DEC-2026-08-03-dual-component` amend `DEC-2026-08-02-shock-axis` (trục SHOCK chính → robustness), **giữ** điều kiện `lag_augmented`. `primary_cell.shock` **vẫn UNRESOLVED** — chốt nó bằng spec kép là chốt bằng *thiết kế* chứ không bằng E1c-exo; khóa bằng test. `docs/16` §9.1 ghi thủ tục; v1.0 của doc đó nói nhầm "ba chữ ký" và "không đổi".
+
+**2026-08-03 (tối) — M5 + M6: TẦNG 4 CÓ THÂN** (`analogue.py`, `reporting/{guard,composer}.py`, 263 test):
+
+- **M5 `econometrics/analogue.py`** — k-NN cosine trên descriptor pre-register (docs/11 §6). Bốn ràng buộc của §6 đều dựng thành **cơ chế**, không phải lời hứa trong docstring:
+  1. `n<5` → `InsufficientAnalogues` (im lặng, cổng P3) — hạ ngưỡng để có số là biến "không biết" thành "biết mơ hồ";
+  2. IQR đổi dấu → `dispersed=True`, `describe()` nói "phân tán, không kết luận" và **không** đưa trung vị ra một mình;
+  3. `episode_table()` luôn liệt kê được — tính kiểm chứng là điểm bán hàng chính;
+  4. `available_at ≤ t` **kể cả trong retrieval**: ứng viên phải nằm trước `as_of` **và** đã diễn biến xong tới `as_of`. Lấy episode cách 3 ngày rồi đọc kết cục h=30 của nó là look-ahead trá hình — test khóa riêng.
+  - z-score/percentile trong descriptor dùng **expanding**, không phải toàn mẫu: chuẩn hóa toàn mẫu làm descriptor 1990 mang thông tin 2026 và "giống nhau" thành giống theo tương lai.
+  - Claim ceiling `association`, in trong chính câu `describe()`.
+- **M6 `reporting/guard.py`** — Guard P1 thành **module dùng chung chạy ở RUNTIME**, không còn là test rời chép lại logic ở mỗi script. `NarrativeBuilder.render()` là **cửa duy nhất** lấy text ra ⇒ quên gọi guard là không thể. Ba thứ guard **không** làm (ghi rõ để không tạo an toàn giả): không kiểm số đúng/sai, không hiểu ngữ nghĩa, không bắt số bị bỏ sót.
+- **M6 `reporting/composer.py`** — Measurement Card + Model Brief, **ba lớp bảo vệ bắt ba loại lỗi khác nhau**: Guard P1 bắt **số** bịa · `assert_claim_ceiling` bắt **từ ngữ** vượt mức nhận dạng (không số nào sai — "IP dự kiến giảm" là nhảy `measurement`→`prediction` chỉ bằng một động từ) · `check_component_labelling` bắt việc gọi ANTICIPATED là cú sốc.
+- **Ba lỗi thật do guard chặn ngay khi viết composer** — đều là loại đáng chặn:
+  1. `sample_note` là **văn xuôi tự do mang số** → đổi thành trường số `n_obs`. Số trong câu văn không đối chiếu được với payload; đó chính là thứ P1 sinh ra để cấm.
+  2. `batch_analogues` trả **chuỗi** lý do bỏ qua → đổi thành **dict có cấu trúc** `{outcome, horizon, n_found, n_required}`, và `InsufficientAnalogues` mang theo số. Composer tự đặt câu từ các trường đó.
+  3. Cổng claim bắt đúng **câu miễn trừ bắt buộc** của card ("KHÔNG phải dự báo") → thêm xử lý phủ định.
+  - Guard cũng phải học không bắt nhầm: giờ gỡ giờ `14:07` và ngày `01/08`, nhưng pattern ngày yêu cầu tháng ≤12 nên tỉ lệ thật như `23/72` **vẫn bị kiểm**.
+
+**Chưa làm, theo thứ tự:** ⛔ **tải dữ liệu AI-GPR + xác minh ghim vintage được** (chặn cả Phase 1 còn lại của `docs/16` §9) · human review bảng γ + E2 · §6.2 người chấm thứ hai → 2c chân B · **M7 track record** (giờ làm được, M6 xong) · 1b cascade tier3 (chờ chuỗi thị trường pilot) · 3c serving (chờ đường nối BeaverX).

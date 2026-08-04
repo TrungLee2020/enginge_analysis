@@ -13,6 +13,7 @@ Khong dung trong production. Production di qua ext_series (dataset.load_*).
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import warnings
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -350,9 +351,16 @@ DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202607.xls"
 DEFAULT_COUNTRY = "VNM"
 
 
+# Tach ACT/THREAT o track THANG (docs/14 §2 muc 1a "tach ACT/THREAT").
+# Ten cot trong file monthly KHAC file daily: monthly la GPRA/GPRT, daily la
+# GPRD_ACT/GPRD_THREAT. Anh xa ve ten CHUNG de runner khong phai biet tan suat.
+GPR_MONTHLY_COMPONENTS = {"GPRA": "GPR_ACT", "GPRT": "GPR_THREAT"}
+
+
 def load_gpr_monthly(
     path: str = DEFAULT_GPR_MONTHLY,
     country: str = DEFAULT_COUNTRY,
+    components: bool = False,
 ) -> pd.DataFrame:
     """Doc GPR (global monthly) + GPRC_<country> tu file monthly -> wide, index=dau thang.
 
@@ -362,6 +370,9 @@ def load_gpr_monthly(
     Tham so hoa nay la dieu kien cua Phase 1b docs/14 §2: cascade tang 3 chay thu
     tren mot NUOC PILOT ngoai lo trinh ban, de khong dot out-of-sample cua VN/TH/ID/PH.
     Mac dinh VNM giu nguyen hanh vi cu.
+
+    ``components=True`` them GPR_ACT/GPR_THREAT (doi ten tu GPRA/GPRT trong file)
+    cho viec tach kenh tho giai doan 1 (docs/11 §5.3) — khong can chan B.
     """
     df = pd.read_excel(path, sheet_name="Sheet1", header=0)
     col = f"GPRC_{country}"
@@ -371,12 +382,54 @@ def load_gpr_monthly(
             f"File monthly thieu {col} — co the la vintage cu 39 nuoc historical-only, "
             f"hoac ma nuoc sai. Cac GPRC_* co trong file: {available}")
     keep = ["month", "GPR", col]
+    if components:
+        keep += list(GPR_MONTHLY_COMPONENTS)
     missing = [c for c in keep if c not in df.columns]
     if missing:
         raise ValueError(f"File monthly thieu cot: {missing}")
     out = df[keep].copy()
     out["month"] = pd.to_datetime(out["month"])
-    return out.set_index("month").sort_index()
+    out = out.set_index("month").sort_index()
+    return out.rename(columns=GPR_MONTHLY_COMPONENTS) if components else out
+
+
+# JUMP o track THANG: cua so rolling KHAC daily mot cach co chu dich.
+# Daily dung 250 phien (~1 nam). Chuyen thang khong phai la 12 — uoc luong phan
+# vi q95 tren 12 quan sat la vo nghia (q95 cua 12 diem = gan nhu max). Quantile
+# can co mau; 120 thang (10 nam) cho ~6 quan sat tren nguong, du de nguong on
+# dinh ma van thich nghi voi regime. Ghi vao metadata report, khong giau.
+MONTHLY_JUMP_WINDOW = 120
+MONTHLY_JUMP_MIN_PERIODS = 60
+
+
+def build_monthly_shock_axis(
+    raw: pd.Series,
+    prefix: str,
+    min_train: int = 60,
+    max_order: int = 5,
+    jump_window: int = MONTHLY_JUMP_WINDOW,
+    jump_q: float = 0.95,
+    jump_min_periods: int = MONTHLY_JUMP_MIN_PERIODS,
+) -> pd.DataFrame:
+    """Ba thuoc do shock cua TRUC BAO CAO (g0 §7.1 = A) o tan suat THANG.
+
+    Tra ve cot `<prefix>_LEVEL`, `<prefix>_INNOVATION`, `<prefix>_LEVEL_PLUS_JUMP`.
+
+    Contract docs/07v2 §0 — sai la hong uoc luong:
+      LEVEL           = log1p(GPR)
+      INNOVATION      = LEVEL − E[LEVEL | qua khu]   (AR(p) rolling, no leakage)
+      LEVEL+JUMP      = LEVEL + JUMP, voi JUMP tinh tren chuoi THO rolling de giu
+                        thong tin duoi. TUYET DOI khong phai INNOVATION + JUMP
+                        (bug lich su E1b, xem registry KĐ-E1b.artifact_formula).
+    """
+    from .shocks import innovation, jump, level_plus_jump
+
+    level = log1p_gpr(raw).rename(f"{prefix}_LEVEL")
+    innov = innovation(raw, min_train=min_train,
+                       max_order=max_order).rename(f"{prefix}_INNOVATION")
+    j = jump(raw, window=jump_window, q=jump_q, min_periods=jump_min_periods)
+    lpj = level_plus_jump(level, j, name=f"{prefix}_LEVEL_PLUS_JUMP")
+    return pd.concat([level, innov, lpj], axis=1)
 
 
 # Cước vận tải biển (docs/11 §5.3) — PPI deep sea freight transportation, FRED.
@@ -394,6 +447,118 @@ def load_gpr_monthly(
 # GIAO NGAY (Baltic Dry / container spot) → đưa vào làm ROBUSTNESS mẫu ngắn, đó mới
 # là thước đo khớp giả thuyết Hormuz/Malacca.
 FRED_FREIGHT = "PCU483111483111"
+
+
+# ---------------------------------------------------------------------------
+# AI-GPR (Iacoviello & Tong 2026) — docs/16 §1. FILE TẢI TAY, không tự fetch.
+# ---------------------------------------------------------------------------
+# Nguồn: matteoiacoviello.com/ai_gpr.html — trang cập nhật ĐỊNH KỲ.
+#
+# ⚠️ Vì sao KHÔNG tự tải trong code (docs/16 §1, nguyên tắc #4): trang cập nhật
+# định kỳ, và nếu chỉ có một file "latest" bị ghi đè mỗi kỳ thì mọi report chạy
+# trên nó KHÔNG tái lập được — `data_version` mất nghĩa. Tải tay + ghim vintage
+# bằng hash file là cách duy nhất giữ được tái lập, giống `wui_global.csv` và
+# `gold_events.csv`. Fetch ngầm mỗi lần chạy = số trong report cũ âm thầm hết đúng.
+#
+# ⚠️ SCHEMA DƯỚI ĐÂY CHƯA ĐƯỢC XÁC MINH trên file thật (2026-08-03: chưa ai tải).
+# Tên cột lấy theo mô tả docs/16 §1. Lần tải đầu PHẢI đối chiếu bằng
+# `describe_ai_gpr_file()` rồi sửa mapping ở đây — KHÔNG đoán rồi để im.
+DEFAULT_AI_GPR_DAILY = "data/ai_gpr_daily.csv"
+
+AI_GPR_COLUMNS = {          # tên trong file (giả định) -> tên dùng trong repo
+    "AIGPR": "AIGPR",
+    "AIGPRT": "AIGPR_THREAT",
+    "AIGPRA": "AIGPR_ACT",
+}
+
+_AI_GPR_MISSING_MSG = (
+    "Không tìm thấy {path}. AI-GPR là file TẢI TAY (docs/16 §1):\n"
+    "  1. Tải từ matteoiacoviello.com/ai_gpr.html\n"
+    "  2. Lưu vào {path}\n"
+    "  3. Chạy `describe_ai_gpr_file()` để ĐỐI CHIẾU tên cột thật với "
+    "AI_GPR_COLUMNS — schema hiện tại CHƯA xác minh trên file thật\n"
+    "Cố ý không tự tải: trang cập nhật định kỳ, fetch ngầm làm report cũ mất "
+    "tái lập (nguyên tắc #4)."
+)
+
+
+def describe_ai_gpr_file(path: str = DEFAULT_AI_GPR_DAILY) -> dict:
+    """Đọc file AI-GPR THÔ và mô tả nó — dùng để đối chiếu schema lần tải đầu.
+
+    Trả `{columns, n_rows, date_col_guess, vintage}`. KHÔNG transform gì: mục
+    đích là xem file thật có gì trước khi tin `AI_GPR_COLUMNS`.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p, nrows=200)
+    date_guess = [c for c in df.columns
+                  if str(c).strip().lower() in {"date", "day", "time", "month"}]
+    return {
+        "columns": list(df.columns),
+        "n_rows_preview": len(df),
+        "date_col_guess": date_guess,
+        "vintage": ai_gpr_vintage(path),
+        "expected_mapping": dict(AI_GPR_COLUMNS),
+    }
+
+
+def ai_gpr_vintage(path: str = DEFAULT_AI_GPR_DAILY) -> str | None:
+    """Hash file AI-GPR = vintage. Vào metadata MỌI report chạy trên AI-GPR.
+
+    Trang cập nhật định kỳ nên hai bản tải cách nhau vài tháng là hai dữ liệu
+    khác nhau; không ghim cái này thì `data_version` của report không phân biệt
+    được chúng.
+    """
+    p = Path(path)
+    if not p.exists():
+        return None
+    return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+
+
+def load_ai_gpr_daily(
+    path: str = DEFAULT_AI_GPR_DAILY,
+    date_col: str = "date",
+    columns: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """AI-GPR daily THÔ (headline + threats/acts) -> wide, index=ngày.
+
+    Thay thế vai trò của `load_gpr_daily` cho các run trên AI-GPR (docs/16 §1).
+    GPRD gốc **giữ nguyên làm đối chứng** — E0 đã PASS trên nó và tương quan hai
+    chỉ số chỉ 0.69, đủ khác để so sánh có nghĩa.
+
+    ⚠️ Trước khi dùng lần đầu: chạy `describe_ai_gpr_file()` và đối chiếu tên cột.
+    Hàm này raise nếu cột khai trong `columns` không có trong file — KHÔNG lặng
+    lẽ bỏ qua cột thiếu, vì thiếu threats/acts thì mọi phân tách ACT/THREAT sau
+    đó âm thầm chạy trên dữ liệu rỗng.
+
+    ⚠️ AI-GPR KHÔNG cùng hình dạng với GPRD (docs/16 §5): mượt hơn, dai hơn
+    (tự tương quan 90 ngày 0.73 vs 0.62), đuôi phải mỏng hơn, không có ngày nào
+    bằng 0. Ngưỡng JUMP q95/q99 rolling **phải hiệu chuẩn lại** — không bê thẳng
+    tham số đã dùng cho GPRD sang.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    mapping = dict(AI_GPR_COLUMNS if columns is None else columns)
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế: "
+            f"{list(df.columns)}. Chạy describe_ai_gpr_file() rồi truyền date_col.")
+    missing = [c for c in mapping if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{path} thiếu cột {missing} (AI_GPR_COLUMNS chưa xác minh trên file "
+            f"thật — docs/16 §1). Cột thực tế: {list(df.columns)}. Đối chiếu bằng "
+            "describe_ai_gpr_file() rồi sửa AI_GPR_COLUMNS hoặc truyền `columns`.")
+    out = df[[date_col, *mapping]].rename(columns=mapping)
+    out[date_col] = pd.to_datetime(out[date_col])
+    out = out.set_index(date_col).sort_index()
+    out.index.name = "date"
+    out.attrs["vintage"] = ai_gpr_vintage(path)
+    out.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return out
 
 
 def transform_freight(raw: pd.Series) -> pd.Series:
@@ -638,6 +803,8 @@ def build_monthly_panel(
     country: str = DEFAULT_COUNTRY,
     real_macro: bool = False,
     battery: bool = False,
+    shock_axis: bool = False,
+    components: bool = False,
 ) -> pd.DataFrame:
     """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_<c>⊥ + macro.
 
@@ -661,6 +828,12 @@ def build_monthly_panel(
         complete-case se CAT PANEL ve 1997+ (mat ~7 nam so ban khong battery);
         chay ca hai ban a/b thi phai so tren CUNG MAU, khong so 1990+ voi 1997+.
         WUI KHONG vao day (quy, xem ghi chu trong than ham).
+      - shock_axis=True: them `GPR_LEVEL`/`GPR_INNOVATION`/`GPR_LEVEL_PLUS_JUMP` —
+        TRUC BAO CAO shock cua bang γ (g0 §7.1 = A, chot 2026-08-02). `GPR_INNOV`
+        van giu (ban cu, KHONG doi ten) va bang `GPR_INNOVATION`.
+      - components=True: them truc shock cho GPR_ACT/GPR_THREAT (tach kenh tho
+        giai doan 1, docs/11 §5.3 — khong can chan B). Chi co tac dung khi
+        shock_axis=True.
       - extra_monthly: cot monthly khac do caller cung cap — join theo thang.
 
     ⚠️ `country`: doi nuoc KHONG doi bat cu gi khac trong panel — tang 1-2 la ENGINE
@@ -672,7 +845,8 @@ def build_monthly_panel(
     from .shocks import innovation
     from .tier3_country import orthogonalize
 
-    gpr_m = load_gpr_monthly(gpr_path, country=country)      # GPR, GPRC_<c> (tho)
+    gpr_m = load_gpr_monthly(gpr_path, country=country,
+                             components=components)          # GPR, GPRC_<c> (tho)
     gpr_m = gpr_m.loc[start:end] if end else gpr_m.loc[start:]
     country_col = f"GPRC_{country}"
 
@@ -701,6 +875,17 @@ def build_monthly_panel(
     macro = macro[cols]
 
     frames = [macro, gpr_innov, vnm_orth_innov]
+    if shock_axis:
+        # Ba thuoc do di CUNG mot duong information-time nhu GPR_INNOV — thang M
+        # chi dung o bucket M+1. Quen align o day = mot thuoc do nhin truoc mot
+        # thang so voi cac thuoc do khac, va so sanh giua chung thanh vo nghia.
+        series = ["GPR", *(["GPR_ACT", "GPR_THREAT"] if components else [])]
+        for name in series:
+            prefix = "GPR" if name == "GPR" else name
+            axis = build_monthly_shock_axis(
+                gpr_m[name], prefix=prefix, min_train=min_train,
+                max_order=max_order)
+            frames.append(align_monthly_gpr_to_information_time(axis))
     if freight:
         fr_raw = load_freight_monthly(start, end, cache_dir, refresh)
         frames.append(transform_freight(fr_raw))

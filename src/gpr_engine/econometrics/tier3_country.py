@@ -29,7 +29,11 @@ from math import factorial
 import pandas as pd
 import statsmodels.api as sm
 
-from .local_projection import run_local_projection
+from .local_projection import (
+    DEFAULT_SUPT_SEED,
+    DEFAULT_SUPT_SIMS,
+    run_local_projection,
+)
 
 
 def orthogonalize(df: pd.DataFrame, target: str, on: Iterable[str]) -> pd.Series:
@@ -58,20 +62,35 @@ def estimate_tier3(
     global_shocks: Iterable[str] = (),
     controls: Iterable[str] = (),
     horizons: Iterable[int] = range(0, 61),
+    inference: str = "hac",
+    lags: int = 4,
+    simultaneous: bool = False,
+    ci: float = 0.90,
+    n_sim: int = DEFAULT_SUPT_SIMS,
+    seed: int = DEFAULT_SUPT_SEED,
 ) -> pd.DataFrame:
     """Uoc luong tang 3: beta (global-direct) + theta (indirect) + lambda (domestic).
 
-    Moi he so lay tu CUNG mot model LP (HAC SE) qua run_local_projection(return_all=True).
+    Moi he so lay tu CUNG mot model LP qua run_local_projection(return_all=True).
 
     Parameters
     ----------
     direct_shock : GPR^{c,⊥} innovation. None cho phep — track daily cua nuoc chi co
         country-GPR monthly thi KHONG co direct shock daily (CLAUDE.md #10).
     global_shocks : cac GPR^{j,innov} (beta). Rong duoc (chi do theta/lambda).
+    inference, lags, simultaneous, ci, n_sim, seed : truyen thang xuong
+        `run_local_projection` (docs/14 M8). Mac dinh giu ban cu = HAC pointwise.
+        `simultaneous=True` tra dai sup-t voi mot `supt_c` RIENG cho tung he so —
+        beta/theta/lambda co ma tran tuong quan qua horizon khac nhau nen khong
+        dung chung hang so duoc. Doc "θ_oil vuot 0 o h=7" tu dai pointwise tren
+        25 horizon la doc sai (~2.5 diem nam ngoai ngay ca khi model dung).
+        `method="quantile"` KHONG mo o day: tang 3 doc dong thoi nhieu he so tu
+        mot phuong trinh, quantile lam doi nghia cua ca phan ra tich chap.
 
     Returns
     -------
-    DataFrame long: [horizon, term, role, coef, se, tstat, pvalue, ci_low, ci_high, nobs]
+    DataFrame long: [horizon, term, role, coef, se, tstat, pvalue, ci_low, ci_high,
+    nobs] (+ ci_low_supt/ci_high_supt/supt_c khi simultaneous=True).
     role ∈ {beta, theta, lambda, control}.
     """
     macro_channels = list(macro_channels)
@@ -103,11 +122,18 @@ def estimate_tier3(
     out = run_local_projection(
         df, y=market_ret, shock=x_cols[0], controls=x_cols[1:],
         horizons=horizons, return_all=True,
+        inference=inference, lags=lags, simultaneous=simultaneous,
+        ci=ci, n_sim=n_sim, seed=seed,
     )
     out = out.rename(columns={"beta": "coef"})
-    out.insert(2, "role", out["term"].map(role_of))
-    return out[["horizon", "term", "role", "coef", "se", "tstat", "pvalue",
-                "ci_low", "ci_high", "nobs"]]
+    # inference="lag_augmented" them cot lag cua y va shock -> khong co trong
+    # role_of. Gan nhan tuong minh thay vi de NaN: chung la NUISANCE, khong doc
+    # duoc nhu beta/theta/lambda.
+    out.insert(2, "role", out["term"].map(role_of).fillna("lag_augmentation"))
+    cols = ["horizon", "term", "role", "coef", "se", "tstat", "pvalue",
+            "ci_low", "ci_high", "nobs", "converged"]
+    cols += [c for c in ("ci_low_supt", "ci_high_supt", "supt_c") if c in out.columns]
+    return out[cols]
 
 
 # ---------------------------------------------------------------------------

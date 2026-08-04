@@ -173,6 +173,66 @@ def jump(
     return j.rename(raw_or_level.name).reindex(raw_or_level.index)
 
 
+# ---------------------------------------------------------------------------
+# PHAN RA HAI THANH PHAN — spec kep docs/16 §2.2 (Iacoviello & Tong 2026 §6.1)
+# ---------------------------------------------------------------------------
+COMPONENT_SUFFIXES = ("ANTICIPATED", "SURPRISE")
+
+
+def delta_decomposition(
+    level_or_raw: pd.Series,
+    order: int | None = None,
+    min_train: int = 60,
+    max_order: int = DEFAULT_MAX_ORDER,
+    window: tuple[str, str] = DEV_WINDOW,
+    is_level: bool = False,
+) -> pd.DataFrame:
+    """Δ LEVEL = ANTICIPATED + SURPRISE — hai regressor cho spec kep docs/16 §2.2.
+
+        SURPRISE_t    = Δ LEVEL_t − Ê_{t-1}[Δ LEVEL_t]     (phan BAT NGO)
+        ANTICIPATED_t = Ê_{t-1}[Δ LEVEL_t]                 (phan DA DU BAO DUOC)
+
+    Vi sao KHONG can code uoc luong moi: Ê_{t-1}[Δ LEVEL_t] = Ê_{t-1}[LEVEL_t] −
+    LEVEL_{t-1}, nen SURPRISE **chinh la** `innovation()` da co. ANTICIPATED lay
+    bang hieu. Nho vay hai thanh phan cong lai bang DUNG Δ LEVEL theo dong nhat
+    thuc (test khoa), khong the lech nhau do hai duong uoc luong khac nhau.
+
+    ⚠️ PHAN RA TREN SAI PHAN, khong phai tren muc. `persistent_ar` tra Ê[LEVEL]
+    — mot chuoi gan nghiem don vi, dua thang vao hoi quy la quay lai dung van de
+    cua #9. Ê[Δ LEVEL] thi dung, bien do nho, va la cai bai AI-GPR dung.
+
+    ⚠️ NHAN (docs/16 §2.2 dieu kien 2): cot ANTICIPATED **khong duoc** goi la cu
+    soc. Xem `shock_axis.component_claim_label` — do la cong may cua quy tac nay.
+
+    ⚠️ SO SANH HAI HE SO phai CHUAN HOA (β×sd). Var(ANTICIPATED)/Var(SURPRISE)
+    thuong ~0.1 tren chuoi sai phan, nen he so tho khong so duoc — xem
+    `docs/reports/E2_component_decomposition_*.md`, o do so tho gap doi ma dong
+    gop chuan hoa lai nho hon, va 48.9% o doi chieu ket luan.
+
+    Returns: DataFrame cot `<name>_ANTICIPATED`, `<name>_SURPRISE`.
+    """
+    level = level_or_raw if is_level else log1p_gpr(level_or_raw)
+    surprise = innovation(level, order=order, min_train=min_train,
+                          max_order=max_order, window=window, is_level=True)
+    anticipated = level.diff() - surprise
+    name = level.name or "GPR"
+    return pd.DataFrame({
+        f"{name}_ANTICIPATED": anticipated.rename(f"{name}_ANTICIPATED"),
+        f"{name}_SURPRISE": surprise.rename(f"{name}_SURPRISE"),
+    })
+
+
+def standardized_contribution(beta: float, regressor: pd.Series) -> float:
+    """β × sd(regressor) — don vi SO SANH DUOC giua hai thanh phan.
+
+    He so THO cua ANTICIPATED va SURPRISE nam tren hai regressor phuong sai khac
+    han nhau (ty le ~0.1 tren chuoi sai phan) nen khong so truc tiep duoc. Day la
+    cung cai bay thang do ma registry ghi cho LEVEL+JUMP
+    (`level_plus_jump_composition`).
+    """
+    return float(beta) * float(regressor.std())
+
+
 def level_plus_jump(
     level: pd.Series,
     jump_component: pd.Series,

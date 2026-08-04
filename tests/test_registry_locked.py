@@ -37,6 +37,18 @@ REQUIRED_HYP_FIELDS = {
 }
 VALID_STATUS = {"registered", "tested", "superseded"}
 
+# Quyết định governance đã ký 2026-08-02 (g0 §7.1/§7.2, docs/14 §6.4/§6.6/§6.1/§6.3).
+# Khóa bằng máy vì mỗi cái đổi nghĩa một nguyên tắc đã khóa: đảo quyết định mà
+# không cập nhật đây trong CÙNG COMMIT → test đỏ. Đó là tính năng, không phải lỗi.
+LOCKED_DECISION_IDS = {
+    "DEC-2026-08-02-shock-axis",
+    "DEC-2026-08-02-holm-family",
+    "DEC-2026-08-02-chanb-window",
+    "DEC-2026-08-02-sources-trading",
+    "DEC-2026-08-03-dual-component",   # docs/16 §2.2, amend shock-axis (§9.1)
+}
+REQUIRED_DECISION_FIELDS = {"id", "decided", "by", "what"}
+
 # Shock hợp lệ: innovation/surprise/jump-based (CLAUDE.md #9). KHÔNG level thô.
 # Cấm rõ các token level để không lẫn LEVEL/zscore vào giả thuyết shock.
 FORBIDDEN_SHOCK_TOKENS = {"GPRD_LEVEL", "GPRC_VNM", "zscore", "log1p_level"}
@@ -141,3 +153,103 @@ def test_sca_timing_contract_locked():
     assert primary["daily_focal_horizons"] == LOCKED_DAILY_FOCAL_HORIZONS
     assert primary["weekend_aggregation"] == LOCKED_WEEKEND_AGGREGATION
     assert "E0_aligned_diagnostic" not in sca["blockers"]
+
+
+# ---------------------------------------------------------------------------
+# Quyết định governance đã ký (2026-08-02)
+# ---------------------------------------------------------------------------
+def test_signed_decisions_locked():
+    """Bốn quyết định đã ký phải còn nguyên trong registry.
+
+    Đảo một quyết định đã ký mà không cập nhật LOCKED_DECISION_IDS trong cùng
+    commit → test đỏ. Cùng cơ chế với AR order: chữ ký chỉ có nghĩa khi việc rút
+    lại nó cũng phải đi qua một commit có chủ đích.
+    """
+    decisions = {d["id"]: d for d in _cfg().get("decisions", [])}
+    missing = LOCKED_DECISION_IDS - set(decisions)
+    assert not missing, (
+        f"Quyết định đã ký biến mất khỏi registry: {sorted(missing)}. Rút lại một "
+        "chữ ký là hành động CÓ CHỦ ĐÍCH — cập nhật LOCKED_DECISION_IDS cùng commit.")
+    for did, d in decisions.items():
+        gaps = REQUIRED_DECISION_FIELDS - set(d)
+        assert not gaps, f"quyết định {did} thiếu trường: {gaps}"
+        assert str(d["what"]).strip(), f"{did}: 'what' rỗng"
+
+
+def test_shock_axis_gate_matches_signed_decision():
+    """Cổng máy phải khớp điều kiện đã ghi trong DEC-2026-08-02-shock-axis.
+
+    Quyết định A cho phép LEVEL/LEVEL+JUMP vào bảng γ, nhưng CHỈ với
+    inference='lag_augmented'. Nếu ai đó nới cổng cho 'hac', LEVEL quay lại là vi
+    phạm CLAUDE.md #9 và test này là chỗ duy nhất bắt được.
+    """
+    from gpr_engine.econometrics.shock_axis import (
+        SHOCK_MEASURES,
+        eligible_measures,
+        gate_shock_eligibility,
+    )
+
+    assert set(eligible_measures("lag_augmented")) == set(SHOCK_MEASURES), (
+        "Điều kiện của quyết định A: cả ba thước đo eligible dưới lag_augmented.")
+    assert set(eligible_measures("hac")) == {"INNOVATION"}, (
+        "Dưới 'hac' chỉ INNOVATION được đọc là phản ứng với cú sốc (#9) — "
+        "nới cổng ở đây là rút lại điều kiện kèm của DEC-2026-08-02-shock-axis.")
+    for m in ("LEVEL", "LEVEL_PLUS_JUMP"):
+        assert not gate_shock_eligibility(m, "hac").eligible
+        assert gate_shock_eligibility(m, "lag_augmented").eligible
+
+
+def test_amending_decision_names_what_it_amends():
+    """Quyết định sửa quyết định khác phải nói RÕ sửa gì và giữ gì.
+
+    docs/16 §9.1: v1.0 của doc đó viết "không đổi ba chữ ký" trong khi §2.2 có
+    sửa một cái. Test này chặn kiểu amend ngầm — `amends` mà không có
+    `amends_detail` thì không ai truy được điều gì còn hiệu lực.
+    """
+    decisions = {d["id"]: d for d in _cfg().get("decisions", [])}
+    for did, d in decisions.items():
+        if "amends" not in d:
+            continue
+        assert d["amends"] in decisions, (
+            f"{did} amend {d['amends']!r} nhưng id đó không có trong registry.")
+        assert str(d.get("amends_detail", "")).strip(), (
+            f"{did} có `amends` nhưng thiếu `amends_detail` — phải ghi rõ SỬA gì "
+            "và GIỮ NGUYÊN gì, nếu không thì không truy được hiệu lực còn lại.")
+
+
+def test_dual_component_keeps_primary_cell_unresolved():
+    """Spec kép KHÔNG được âm thầm chốt ô chính.
+
+    docs/16 §2.2 đề xuất chuyển primary_cell.shock sang spec kép. Làm thế là chốt
+    bằng THIẾT KẾ chứ không bằng E1c-exo — đúng thứ mà UNRESOLVED sinh ra để
+    tránh. Chốt ô chính phải là chữ ký RIÊNG; tới lúc đó test này giữ hiện trạng.
+    """
+    cfg = _cfg()
+    sca = next(x for x in cfg["specification_curves"] if x["id"] == "SCA-01")
+    assert sca["primary_cell"]["shock"] == "UNRESOLVED", (
+        "primary_cell.shock đã đổi khỏi UNRESOLVED — đó là quyết định governance "
+        "riêng (docs/16 §9.1), cần chữ ký mới + cập nhật test này cùng commit.")
+    dec = next(d for d in cfg["decisions"]
+               if d["id"] == "DEC-2026-08-03-dual-component")
+    assert "UNRESOLVED" in dec["not_yet_decided"]
+
+
+def test_holm_families_match_report_axis():
+    """Họ Holm trong code phải TRÙNG KHÍT SCA-01.report_axis_outcome.
+
+    Đó chính là nội dung quyết định B: dùng lại ranh giới đã pre-register TRƯỚC
+    khi nhìn kết quả. Nếu code tự chia họ khác đi thì chữ ký mất nghĩa.
+    """
+    from gpr_engine.econometrics.multiplicity import PREREGISTERED_OUTCOME_FAMILIES
+
+    sca = next(x for x in _cfg()["specification_curves"] if x["id"] == "SCA-01")
+    axis = sca["report_axis_outcome"]
+    assert set(axis) == set(PREREGISTERED_OUTCOME_FAMILIES), (
+        f"Tên họ lệch: registry={sorted(axis)} vs "
+        f"code={sorted(PREREGISTERED_OUTCOME_FAMILIES)}")
+    for fam, members in axis.items():
+        # registry viết IP/CPI/infl_expectation; code dùng tên CỘT panel.
+        assert len(members) == len(PREREGISTERED_OUTCOME_FAMILIES[fam]), (
+            f"Họ {fam}: registry có {len(members)} outcome, code có "
+            f"{len(PREREGISTERED_OUTCOME_FAMILIES[fam])} — cỡ họ đổi thì ngưỡng "
+            "Holm đổi theo, phải đồng bộ trong cùng commit.")
