@@ -389,14 +389,23 @@ def score_statements(
     return scored, drop_df
 
 
-def openai_chat_client(model: str = "gpt-4o-mini") -> LLMClient:
-    """LLMClient dua tren OpenAI SDK (GPT-4o-mini cho backfill, CLAUDE.md stack).
+def openai_chat_client(model: str = "gpt-4o-mini",
+                       base_url: str | None = None,
+                       api_key: str | None = None) -> LLMClient:
+    """LLMClient dua tren OpenAI SDK — hoat dong voi BAT KY endpoint tuong thich
+    OpenAI nao (khong chi OpenAI that), dung cho pipeline production khi model
+    cham dinh sau (news_pipeline.py, docs cho `scripts/run_news_service.py`).
 
-    Import luoi de test/offline khong can package. JSON mode cua API chi ep
-    "la JSON" — contract strict van do parse_score giu.
+    `base_url`/`api_key` None -> OpenAI SDK tu doc env (`OPENAI_BASE_URL`,
+    `OPENAI_API_KEY`) — truyen tuong minh o day de ro rang, khong dua vao hanh
+    vi ngam cua SDK. Import luoi de test/offline khong can package. JSON mode
+    cua API chi ep "la JSON" — contract strict van do parse_score giu.
     """
+    import os
+
     from openai import OpenAI
-    client = OpenAI()
+    client = OpenAI(base_url=base_url or os.environ.get("OPENAI_BASE_URL"),
+                    api_key=api_key or os.environ.get("OPENAI_API_KEY"))
 
     def _call(messages: list[dict[str, str]], temperature: float) -> str:
         resp = client.chat.completions.create(

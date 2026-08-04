@@ -26,5 +26,8 @@ pandas-datareader>=0.10  # FRED
 # --- LLM scoring (chân B: statement_scorer.py) ---
 openai>=1.40
 
+# --- Serving (service/kafka_io.py): "1 tin vào -> 1 kết quả ra" đẩy Kafka ---
+confluent-kafka>=2.3
+
 # --- Viz cho notebook khám phá (G1.4) ---
 matplotlib>=3.8

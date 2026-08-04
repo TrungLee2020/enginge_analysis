@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from gpr_engine.econometrics.analogue import AnalogueResult, Neighbour
+from gpr_engine.pipeline.vn_exposure import vn_exposure_note
 from gpr_engine.reporting.composer import (
     TIER_CLAIM_CEILING,
     ClaimCeilingViolation,
@@ -20,6 +21,7 @@ from gpr_engine.reporting.composer import (
     claim_footer,
     compose_measurement_card,
     compose_model_brief,
+    compose_vn_note,
 )
 from gpr_engine.reporting.guard import GuardViolation
 
@@ -145,3 +147,24 @@ def test_brief_allows_shock_wording_for_surprise_component():
     brief = compose_model_brief(TRIGGER, [cell], [_analogue()],
                                 {"jump_pctile": 96.0}, BRIEF_META)
     assert "cú sốc lên IP" in brief
+
+
+# ---------------------------------------------------------------------------
+# VN note (tầng 3 VN, chưa có β/θ/λ — chỉ kênh + hướng)
+# ---------------------------------------------------------------------------
+def test_vn_note_has_association_ceiling_and_no_quant_caveat():
+    note = compose_vn_note(vn_exposure_note("trade"), {"generated_at": "2026-08-04"})
+    assert claim_footer("vn_note") in note
+    assert "chưa có tham số ước lượng" in note.lower()
+    assert TIER_CLAIM_CEILING["vn_note"] == "association"
+
+
+def test_vn_note_rejects_causal_wording():
+    """`vn_note` dùng chung trần association với analogue — cùng cấm từ nhân quả."""
+    with pytest.raises(ClaimCeilingViolation, match="NHÂN QUẢ"):
+        assert_claim_ceiling("vn_note", "Cú sốc này gây ra sụt giảm VN-Index.")
+
+
+def test_vn_note_omits_meta_line_when_absent():
+    note = compose_vn_note(vn_exposure_note("energy"), {})
+    assert "_generated:" not in note
