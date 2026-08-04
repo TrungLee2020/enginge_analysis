@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from ..econometrics.analogue import AnalogueResult, describe as describe_analogue
 from ..econometrics.shock_axis import check_component_labelling
+from ..pipeline.vn_exposure import VNExposure
 from .guard import NarrativeBuilder
 
 CLAIM_MEASUREMENT = "measurement"
@@ -32,10 +33,15 @@ CLAIM_ASSOCIATION = "association"
 CLAIM_PREDICTIVE = "predictive, chưa xác nhận holdout"
 
 # Tran claim theo tang — docs/15 §4. Khong tang nao duoc claim cao hon muc cua no.
+# "vn_note": tang 3 VN khi CHUA co beta/theta/lambda da fit (config/params/vn.yaml
+# chua co muc `fitted:`) — chi con la mo ta kenh + huong, tran = association,
+# GIONG HET tran cua analogue vi cung la "trong nhung dot tuong tu, kenh nay
+# thuong di theo huong nay" chu khong phai con so du bao.
 TIER_CLAIM_CEILING = {
     "card": CLAIM_MEASUREMENT,
     "analogue": CLAIM_ASSOCIATION,
     "distribution": CLAIM_PREDICTIVE,
+    "vn_note": CLAIM_ASSOCIATION,
 }
 
 LADDER_NAMES = {0: "S0 bình thường", 1: "S1 khẩu chiến", 2: "S2 đe dọa",
@@ -222,4 +228,31 @@ def compose_model_brief(
     b.add(claim_footer("distribution"))
     text = b.render()
     assert_claim_ceiling("analogue", _body_only(text))
+    return text
+
+
+def compose_vn_note(exposure: VNExposure, meta: Mapping[str, str]) -> str:
+    """Phan VIET NAM (tang 3) khi CHUA co beta/theta/lambda da fit cho VN.
+
+    `exposure` tu `pipeline.vn_exposure.vn_exposure_note` — thuan tra bang tu
+    vietnam-params.md §2, khong LLM. Khi `has_quant_params=False` (hien tai
+    LUON False — xem docstring `vn_exposure.py`), phan nay CHI noi kenh +
+    huong, khong mot con so du bao nao — dung nguyen tac cua chinh skill
+    gpr-macro-assessment ("khong co tham so uoc luong thi khong co claim dinh
+    luong").
+    """
+    payload = {"has_quant_params": exposure.has_quant_params}
+    b = NarrativeBuilder(payload=payload)
+    b.add(f"**VIỆT NAM** — kênh: {exposure.exposure_channel}")
+    b.add("- Vai trò: spillover (VN hầu như không phải initiator/respondent).")
+    b.add(f"- {exposure.direction_note}")
+    b.add(f"- Cơ chế: {exposure.mechanism_note}")
+    if not exposure.has_quant_params:
+        b.add("- Chưa có tham số ước lượng (β/θ/λ) cho VN — chỉ nêu kênh và "
+              "hướng, KHÔNG nói độ lớn.")
+    if meta.get("generated_at"):
+        b.add(f"\n_generated: {meta['generated_at']}_")
+    b.add(claim_footer("vn_note"))
+    text = b.render()
+    assert_claim_ceiling("vn_note", _body_only(text))
     return text

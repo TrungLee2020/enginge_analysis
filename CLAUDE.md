@@ -41,7 +41,43 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-03)
+## Trạng thái hiện tại (cập nhật 2026-08-04)
+
+### 🏭 Pipeline serving đầu tiên — "1 tin vào → GPR + khuyến nghị vĩ mô → VN", đẩy Kafka
+
+Module mới `pipeline/` + `service/` (không sửa logic kinh tế lượng đã có, chỉ ghép nối):
+`pipeline/news_pipeline.py` (`process_news_item`, thuần + inject I/O — test bằng fake,
+`process_news_item_live` nối Postgres/file γ thật) → chấm (`scoring.statement_scorer`)
+→ S-GPR + Escalation Ladder (`indices.s_gpr` + `econometrics.ladder`) → γ tầng 2
+(`pipeline/gamma_lookup.py`) → VN tầng 3 định tính (`pipeline/vn_exposure.py`) →
+3 đoạn văn bản qua `reporting/composer.py` (`compose_measurement_card` +
+`compose_model_brief` + **`compose_vn_note` mới**, tầng `vn_note` claim=`association`).
+I/O: `service/store.py` (Postgres, schema `sql/002_schema_serving.sql`:
+`statements`/`statement_scores`/`ladder_state`/`news_assessment`) +
+`service/kafka_io.py` (`confluent-kafka`, publisher injectable). Entrypoint thật:
+`scripts/run_news_service.py` (đọc/ghi Kafka qua `bootstrap.servers` — hoạt động
+như nhau dù broker chạy KRaft hay ZooKeeper, client không biết chế độ nào).
+`scoring/statement_scorer.py::openai_chat_client` thêm `base_url`/`api_key` — trỏ
+được sang endpoint OpenAI-compatible khác, model chọn qua env `GPR_LLM_MODEL`.
+
+**Hai giới hạn THẬT, cố ý không che (đọc trước khi tin output):**
+- Bảng γ tầng 2 hiện có (`docs/reports/data/t2_full_holm_*.csv`) tách theo
+  `channel ∈ {pooled, act, threat}` (biến thể GPRD dùng làm shock) — **không**
+  tách theo kênh truyền dẫn energy/trade/financial/military. `gamma_lookup.
+  commitment_to_gamma_channel` là PROXY (announced_action→act,
+  rhetoric/conditional→threat), không phải cùng một trục dữ liệu — ghi rõ
+  trong `sample_caveat` của mọi Model Brief pipeline sinh ra.
+- VN (tầng 3) **chưa định lượng**: `config/params/vn.yaml` chưa có mục
+  `fitted:`, `build_monthly_panel()` chưa có cột lợi suất VN-Index thật. Pipeline
+  chỉ nêu kênh phơi nhiễm + hướng định tính (đúng nguyên tắc skill
+  gpr-macro-assessment: không tham số ước lượng → không claim định lượng).
+  Analogue lịch sử theo từng tin (`econometrics/analogue.py`) cũng chưa nối —
+  cần panel tháng dựng từ FRED, quá nặng để chạy mỗi tin; để trống có chủ đích.
+- 306 test pass (18 test mới ở `tests/pipeline/`). Không có Postgres/Kafka
+  sống trong sandbox để test end-to-end thật — cùng giới hạn với `ingest/*.py`
+  vốn cũng chưa từng có test DB thật.
+
+## Trạng thái trước đó (2026-08-03)
 
 ### 📄 `docs/16` — AI-GPR (Iacoviello & Tong 2026) đổi hướng một phần kế hoạch
 
@@ -165,9 +201,17 @@ Report versioned vào `docs/reports/` — **không bao giờ ghi đè** (`FileEx
 
 ```bash
 psql "$DSN" -f sql/001_schema_core.sql
+psql "$DSN" -f sql/002_schema_serving.sql   # statements/statement_scores/ladder_state/news_assessment
 python -m gpr_engine.ingest.gpr_daily   --path data/data_gpr_daily_recent.xls --dsn "$DSN"
 python -m gpr_engine.ingest.gpr_monthly --path data/data_gpr_export_202607.xls --dsn "$DSN"
 python -m gpr_engine.ingest.market_data --dsn "$DSN" --source fred
+```
+
+**Chạy pipeline serving thật** (sau khi đã ingest ở trên — cần γ đã có ở `docs/reports/data/t2_full_holm_*.csv`, tức đã chạy `run_t2_full.py` ít nhất một lần):
+
+```bash
+export GPR_DB_DSN=... OPENAI_API_KEY=... GPR_TRAINING_CUTOFF=2026-01-01 GPR_KAFKA_BOOTSTRAP=host:9092
+python scripts/run_news_service.py
 ```
 
 `tests/test_config_locked.py` khóa `config/backtest.yaml` bằng máy: sửa mốc split mà không cập nhật `LOCKED_SPLIT` trong **cùng commit** → test đỏ. Đó là tính năng (nguyên tắc #3), không phải lỗi.
@@ -195,7 +239,16 @@ Tầng 4 (nhận định — ghép γ + tiền lệ + đo lường, gắn nhãn 
 
 - `econometrics/analogue.py` — **M5, k-NN tiền lệ**. Bốn ràng buộc docs/11 §6 là **cơ chế**: `n<5` → raise (im lặng, cổng P3 — hạ ngưỡng để có số là biến "không biết" thành "biết mơ hồ") · IQR đổi dấu → "phân tán, không kết luận", KHÔNG đưa trung vị ra một mình · `episode_table()` luôn liệt kê được · `available_at ≤ t` **kể cả trong retrieval** (ứng viên phải nằm trước `as_of` VÀ đã diễn biến xong tới đó — lấy episode cách 3 ngày rồi đọc kết cục h=30 là look-ahead trá hình). Descriptor dùng **expanding**, không chuẩn hóa toàn mẫu. Claim ceiling `association`. ⚠️ Thiết kế này **không có tiền lệ trong literature GPR** (docs/11 §6 tự ghi) — độ chắc chắn thấp hơn §5.2/§5.3.
 - `reporting/guard.py` — **Guard P1 dùng chung, chạy RUNTIME**. `NarrativeBuilder.render()` là **cửa duy nhất** lấy text ⇒ quên guard là không thể. Ba thứ nó KHÔNG làm (đọc trước khi tin): không kiểm số đúng/sai · không hiểu ngữ nghĩa ("tăng 5%" khi payload nói giảm vẫn lọt) · không bắt số bị bỏ sót. **Đừng đưa số vào văn xuôi tự do** — dùng trường số trong payload, guard sẽ chặn đúng cách làm sai này.
-- `reporting/composer.py` — card + brief. `assert_claim_ceiling` chặn **từ ngữ** vượt trần tầng (docs/15 §4): card claim `measurement` nên "IP dự kiến giảm" bị chặn — không số nào sai, chỉ một động từ nhảy mức nhận dạng.
+- `reporting/composer.py` — card + brief + **`compose_vn_note`** (mới 2026-08-04). `assert_claim_ceiling` chặn **từ ngữ** vượt trần tầng (docs/15 §4): card claim `measurement` nên "IP dự kiến giảm" bị chặn — không số nào sai, chỉ một động từ nhảy mức nhận dạng. `vn_note` dùng chung trần `association` với `analogue`.
+
+Serving — "1 tin vào → 1 kết quả ra" (mới 2026-08-04, xem mục Trạng thái hiện tại):
+
+- `pipeline/news_pipeline.py` — orchestrator. `process_news_item` THUẦN (mọi I/O tiêm callable — `history_provider`/`jump_series_provider`/`gamma_loader`, test bằng fake, không Postgres/Kafka thật). `process_news_item_live` nối callable thật vào `service/store.py` + file γ mới nhất. Guard P1/trần claim có thể chặn `measurement_card` (ví dụ `rationale` LLM chứa số lạ) — bắt bằng try/except, suy giảm có kiểm soát (`measurement_card=None` + `measurement_card_error`), KHÔNG làm sập cả pipeline vì một dòng văn bản.
+- `pipeline/gamma_lookup.py` — đọc bảng γ đã công bố lọc theo `channel` (`pooled`/`act`/`threat` — ⚠️ đây LÀ biến thể GPRD dùng làm shock, KHÔNG PHẢI kênh truyền dẫn energy/trade/financial/military). `commitment_to_gamma_channel` là proxy tường minh, không phải cùng trục dữ liệu.
+- `pipeline/vn_exposure.py` — tra bảng thuần (từ `vietnam-params.md`), KHÔNG LLM, KHÔNG hồi quy. `has_quant_params` luôn `False` cho tới khi `config/params/vn.yaml` có mục `fitted:`.
+- `service/store.py` — I/O Postgres (schema `sql/002_schema_serving.sql`), cùng pattern `create_engine`+`text()` UPSERT của `ingest/gpr_daily.py`. Không có test DB thật (giống toàn bộ `ingest/*.py`).
+- `service/kafka_io.py` — `KafkaResultPublisher` (publish_fn tiêm vào) + `run_consumer_loop` (`confluent-kafka`). Chỉ dùng `bootstrap.servers` — hoạt động như nhau dù broker KRaft hay ZooKeeper.
+- `scripts/run_news_service.py` — entrypoint sống, cấu hình 100% qua biến môi trường (`GPR_DB_DSN`, `GPR_KAFKA_BOOTSTRAP`, `GPR_LLM_MODEL`...), xem docstring đầu file cho danh sách đầy đủ.
 
 - `econometrics/panel_var.py` — **block-exogenous VAR + Granger test khối** (docs/11 §5.5): nền hình thức cho #8. `granger_block_test(H0: Z↛X)` — không bác bỏ → kiến trúc engine+params hợp lệ cho nước c. Kiểm định GIẢ ĐỊNH, không phải IRF. VN thật cần r^c (VN-Index) + p (chính sách) chờ đường nối BeaverX.
 
