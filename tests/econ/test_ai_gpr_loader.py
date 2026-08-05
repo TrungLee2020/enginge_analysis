@@ -21,8 +21,10 @@ from gpr_engine.econometrics.data_files import (
 
 
 def _write(path, cols: dict, n: int = 50) -> None:
+    # Cot ngay "Date" (hoa D) khop file that (xac minh 2026-08-05, xem
+    # data_files.py AI_GPR_COLUMNS) — khong phai "date" gia dinh cu.
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
-    pd.DataFrame({"date": idx, **{c: range(n) for c in cols}}).to_csv(path, index=False)
+    pd.DataFrame({"Date": idx, **{c: range(n) for c in cols}}).to_csv(path, index=False)
 
 
 @pytest.fixture
@@ -53,7 +55,7 @@ def test_loads_and_renames(good_file):
 def test_missing_column_raises_not_silently_dropped(tmp_path):
     """Thiếu threats/acts phải NỔ — nếu bỏ qua thì tách ACT/THREAT sau đó rỗng."""
     p = tmp_path / "partial.csv"
-    _write(p, {"AIGPR": None})           # thiếu AIGPRT/AIGPRA
+    _write(p, {"GPR_AI": None})          # thiếu THREATS_GPR_AI/ACTS_GPR_AI/...
     with pytest.raises(ValueError, match="thiếu cột"):
         load_ai_gpr_daily(str(p))
 

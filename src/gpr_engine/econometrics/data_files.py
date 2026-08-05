@@ -460,15 +460,42 @@ FRED_FREIGHT = "PCU483111483111"
 # bằng hash file là cách duy nhất giữ được tái lập, giống `wui_global.csv` và
 # `gold_events.csv`. Fetch ngầm mỗi lần chạy = số trong report cũ âm thầm hết đúng.
 #
-# ⚠️ SCHEMA DƯỚI ĐÂY CHƯA ĐƯỢC XÁC MINH trên file thật (2026-08-03: chưa ai tải).
-# Tên cột lấy theo mô tả docs/16 §1. Lần tải đầu PHẢI đối chiếu bằng
-# `describe_ai_gpr_file()` rồi sửa mapping ở đây — KHÔNG đoán rồi để im.
-DEFAULT_AI_GPR_DAILY = "data/ai_gpr_daily.csv"
+# ✅ SCHEMA ĐÃ XÁC MINH tren file that (2026-08-05, tai tu
+# matteoiacoviello.com/ai_gpr_files/ai_gpr_data_daily.csv, vintage
+# 13b8e8b48d41, 1960-01-01 .. 2026-07-31, 24319 hang). Ten file THAT khac ten
+# gia dinh cu (`ai_gpr_daily.csv` -> `ai_gpr_data_daily.csv`), cot ngay la
+# `Date` (hoa D) khong phai `date`, va BA cot AIGPR/AIGPRT/AIGPRA gia dinh
+# truoc day SAI HOAN TOAN ten that (GPR_AI/THREATS_GPR_AI/ACTS_GPR_AI).
+#
+# ⚠️ Phat hien quan trong so voi docs/16: ban DAILY DA CO san 8 cot GPR_OIL
+# theo VUNG (MiddleEast/Russia/USA/Venezuela/Africa/Americas/Asia/NorthSea) —
+# docs/16 §1 doc mo ta trang web thi tuong day chi co o ban THANG, sai. Kiem
+# tren du lieu that quan trong hon doc mo ta trang.
+#
+# ⚠️ Con lai CHUA xac minh (can AI_GPR_PAPER.pdf, KHONG doan):
+#   - `GPR_AER` — nghia cot chua ro (co the lien quan American Economic
+#     Review, noi paper GPR goc dang — nhung day la DOAN, khong dua vao).
+#   - 8 cot GPR_OIL_<vung> KHONG cong don ve dung GPR_OIL (da kiem tay tren
+#     nhieu hang — vd hang 2026-07-31: tong 8 vung = 908.44 nhung
+#     GPR_OIL=628.92) — co the trung lap vung hoac GPR_OIL tinh rieng, chua
+#     ro co che, dung suy dien tong hop khi chua doc paper.
+DEFAULT_AI_GPR_DAILY = "data/ai_gpr_data_daily.csv"
 
-AI_GPR_COLUMNS = {          # tên trong file (giả định) -> tên dùng trong repo
-    "AIGPR": "AIGPR",
-    "AIGPRT": "AIGPR_THREAT",
-    "AIGPRA": "AIGPR_ACT",
+AI_GPR_COLUMNS = {          # ten that trong file -> ten dung trong repo
+    "GPR_AI": "AIGPR",
+    "GPR_AER": "AIGPR_AER",              # nghia chua xac minh — xem canh bao tren
+    "GPR_OIL": "AIGPR_OIL",
+    "GPR_NONOIL": "AIGPR_NONOIL",
+    "THREATS_GPR_AI": "AIGPR_THREAT",
+    "ACTS_GPR_AI": "AIGPR_ACT",
+    "GPR_OIL_MiddleEast": "AIGPR_OIL_MIDDLEEAST",
+    "GPR_OIL_Russia": "AIGPR_OIL_RUSSIA",
+    "GPR_OIL_USA": "AIGPR_OIL_USA",
+    "GPR_OIL_Venezuela": "AIGPR_OIL_VENEZUELA",
+    "GPR_OIL_Africa": "AIGPR_OIL_AFRICA",
+    "GPR_OIL_Americas": "AIGPR_OIL_AMERICAS",
+    "GPR_OIL_Asia": "AIGPR_OIL_ASIA",
+    "GPR_OIL_NorthSea": "AIGPR_OIL_NORTHSEA",
 }
 
 _AI_GPR_MISSING_MSG = (
@@ -518,10 +545,15 @@ def ai_gpr_vintage(path: str = DEFAULT_AI_GPR_DAILY) -> str | None:
 
 def load_ai_gpr_daily(
     path: str = DEFAULT_AI_GPR_DAILY,
-    date_col: str = "date",
+    date_col: str = "Date",
     columns: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
-    """AI-GPR daily THÔ (headline + threats/acts) -> wide, index=ngày.
+    """AI-GPR daily THÔ -> wide, index=ngày.
+
+    File that (xac minh 2026-08-05) KHONG chi co headline+threats/acts nhu
+    docs/16 §1 mo ta ban dau — con co GPR_AER, GPR_OIL/GPR_NONOIL, VA 8 cot
+    GPR_OIL theo VUNG (energy channel routing co san o muc DAILY, khong phai
+    chi THANG nhu doc mo ta trang web). Xem canh bao ben canh AI_GPR_COLUMNS.
 
     Thay thế vai trò của `load_gpr_daily` cho các run trên AI-GPR (docs/16 §1).
     GPRD gốc **giữ nguyên làm đối chứng** — E0 đã PASS trên nó và tương quan hai

@@ -41,7 +41,24 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-04)
+## Trạng thái hiện tại (cập nhật 2026-08-05)
+
+### 🐛 6 bug thật vá trong pipeline serving (rà lại sau khi ship) + ✅ AI-GPR daily xác minh trên file thật
+
+**Rà lại `pipeline/news_pipeline.py` + `service/*.py` sau khi ship (2026-08-05), tìm và vá 6 bug thật** (không phải giả thuyết — tái hiện trước khi vá, có test khóa lại):
+- `published_at` tz-naive làm crash (Statement cho phép naive, phần còn lại pipeline là UTC tz-aware) — chuẩn hóa tại ranh giới (`_as_utc`), KHÔNG đổi hợp đồng `Statement` (phá test cũ).
+- `ext_series`/`statement_scores` cho phép nhiều `data_version`/`model_version` cùng ngày/tin — không lọc thì `JUMP`/S-GPR rolling đếm trùng. Sửa bằng `DISTINCT ON` lấy bản mới nhất.
+- `process_news_item_live` ghi đè `ladder_state` bằng 0 giả khi tính hỏng (vd role lạ) — thêm cờ `ladder_computed`, chỉ ghi DB khi tính thành công thật.
+- `speaker_role` lạ, chain-A GPRD cũ (`chain_a_stale` flag mới), Kafka publish fire-and-forget (thêm `flush()` + `on_delivery`, raise rõ khi không xác nhận được).
+- 328 test pass. Xem lịch sử commit trên branch để chi tiết từng bug.
+
+**AI-GPR daily (docs/16) — ⛔ blocker cũ đã gỡ MỘT PHẦN.** Tải file thật lần đầu (2026-08-05, vintage `13b8e8b48d41`, 1960-01-01..2026-07-31) lộ ra **schema giả định trước đó sai hoàn toàn** (`AIGPR`/`AIGPRT`/`AIGPRA` giả định ↔ `GPR_AI`/`THREATS_GPR_AI`/`ACTS_GPR_AI` thật, cột ngày `Date` không phải `date`) — đã sửa `AI_GPR_COLUMNS` + `DEFAULT_AI_GPR_DAILY` + test khớp file thật, `load_ai_gpr_daily()` chạy sạch trên file thật.
+
+**⚠️ docs/16 §3 tự đính chính lần 2 — tiền đề "Country index daily" SAI.** Trang download thật liệt kê `ai_gpr_country_monthly.csv`/`ai_gpr_bilateral_monthly.csv` — **monthly**, không phải daily như v1.1 khẳng định. Kết luận "gỡ ràng buộc #10 cho VN daily track" **rút lại** — #10 vẫn cấm, `vn_market_series_missing` KHÔNG phải blocker duy nhất còn lại. Điểm ĐÚNG: Oil GPR theo vùng **thật sự có ở daily** (8 vùng, không phải 13 như bảng cũ) — ứng viên thật cho channel routing kênh energy ở γ. Chưa tải: 3 file monthly (country×vai trò, country×8-loại-sự-kiện, bilateral) — cần trước khi làm gì tiếp với chúng.
+
+**Domain `matteoiacoviello.com` bị chặn ở egress policy của sandbox Claude Code** (xác nhận qua `curl $HTTPS_PROXY/__agentproxy/status`, không phải trang chặn bot) — file AI-GPR bắt buộc tải tay + upload vào phiên, không tự fetch được.
+
+## Trạng thái trước đó (2026-08-04)
 
 ### 🏭 Pipeline serving đầu tiên — "1 tin vào → GPR + khuyến nghị vĩ mô → VN", đẩy Kafka
 
