@@ -671,17 +671,22 @@ DEFAULT_AI_GPR_BILATERAL_MONTHLY = "data/ai_gpr_bilateral_monthly.csv"
 # thiết kế của paper: định nghĩa "spillover" của paper liệt kê energy
 # shock/trade disruption như VÍ DỤ CƠ CHẾ lan tỏa, không phải một loại sự
 # kiện. Vì vậy KHÔNG có cách nào map 1-1 sạch — xem `EVENT_TYPE_TO_CHANNEL`
-# (đề xuất, CHƯA dùng trong production) ngay dưới đây.
+# (Ý NGHĨA đã ký `DEC-2026-08-05-event-type-channel`, chưa nối vào production
+# nào) ngay dưới đây.
 AI_GPR_EVENT_TYPES = (
     "military_conflict", "diplomatic_tension", "terrorism", "civil_war",
     "nuclear_threat", "coup", "sanctions", "other",
 )
 
-# ĐỀ XUẤT map 8 loại sự kiện -> 4 kênh truyền dẫn — CHƯA DÙNG Ở BẤT KỲ ĐƯỜNG
-# PRODUCTION NÀO (gamma_lookup.py vẫn chỉ dùng pooled/act/threat như cũ). Đây
-# là quyết định thiết kế cần XÁC NHẬN trước khi dùng, không phải sự thật đã
-# kiểm định — cùng tinh thần `CHANNEL_TO_TRANSMISSION` trong statement_scorer.py
-# (chỉ điền cặp hiển nhiên, còn lại None).
+# Map 8 loại sự kiện -> 4 kênh truyền dẫn — Ý NGHĨA đã KÝ (2026-08-05,
+# `DEC-2026-08-05-event-type-channel`, config/hypothesis_registry.yaml
+# `decisions:`, khóa bằng test_event_type_channel_decision_matches_code).
+# ⚠️ Chữ ký chỉ xác nhận Ý NGHĨA của mapping — CHƯA nối vào bất kỳ đường
+# production nào (gamma_lookup.py vẫn chỉ dùng pooled/act/threat như cũ, đó
+# là biến thể GPRD dùng làm shock, KHÔNG PHẢI trục 4 kênh này). Nối dây thật
+# (nếu có) là quyết định kiến trúc/kỹ thuật RIÊNG, vẫn phải qua nguyên tắc #1
+# (research trước khi vào service). Cùng tinh thần `CHANNEL_TO_TRANSMISSION`
+# trong statement_scorer.py (chỉ điền cặp hiển nhiên, còn lại None).
 #
 # Lý do từng dòng:
 #   military_conflict, civil_war, coup, nuclear_threat -> military: cả bốn

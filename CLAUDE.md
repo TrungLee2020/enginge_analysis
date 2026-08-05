@@ -52,6 +52,8 @@ Ba việc user yêu cầu làm liền ("làm từ 1 đến 3 luôn"), tất cả
 - **Task 1 (đề xuất `EVENT_TYPE_TO_CHANNEL`, mới trong `data_files.py`, CHƯA dùng production):** 8 loại sự kiện AI-GPR **không có category tương ứng trực tiếp cho energy/trade** — `military_conflict`/`civil_war`/`coup`/`nuclear_threat`→`military`, `sanctions`→`financial`, còn `terrorism`/`diplomatic_tension`/`other`→`None` (chưa xác định, không đoán). Energy nên lấy từ `AIGPR_OIL_*` (đã có, daily), trade nên lấy từ bilateral index (đã có, monthly) — cả hai đã ingest, không cần suy ra từ event-type. Test khóa mapping không lệch khỏi `AI_GPR_EVENT_TYPES` thật + khóa phát hiện "không có energy/trade" (`tests/econ/test_ai_gpr_decompositions.py`).
 - **Việc code:** chỉ thêm hằng số + docstring lý do, KHÔNG đổi đường production nào (nguyên tắc #1 — chưa qua cổng kiểm định thì không vào service). 333 test pass.
 
+**Vòng 3 cùng ngày — user chọn ký `EVENT_TYPE_TO_CHANNEL`:** thêm `DEC-2026-08-05-event-type-channel` vào `config/hypothesis_registry.yaml` §`decisions:` (cùng thủ tục `DEC-2026-08-02-shock-axis`), khóa bằng `LOCKED_DECISION_IDS` + test mới `test_event_type_channel_decision_matches_code` (chặn code đổi mapping mà quên sửa chữ ký). **Phạm vi chữ ký hẹp có chủ đích:** chỉ xác nhận Ý NGHĨA của mapping (8 loại sự kiện → 4 kênh, energy/trade lấy từ nguồn khác không suy từ event-type) — KHÔNG mở khóa dùng trong `gamma_lookup.py`/`vn_exposure.py` hay bất kỳ đường production nào, việc nối dây thật vẫn là quyết định kiến trúc riêng qua nguyên tắc #1. 334 test pass.
+
 ## Trạng thái trước đó (2026-08-05, vòng 1)
 
 ### 🐛 6 bug thật vá trong pipeline serving (rà lại sau khi ship) + ✅ AI-GPR daily xác minh trên file thật
