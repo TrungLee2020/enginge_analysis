@@ -623,17 +623,164 @@ def load_ai_gpr_monthly(
     (xác minh 2026-08-05, vintage `92b9ba3bd38f`) — chỉ khác tần suất, tái
     dùng `AI_GPR_COLUMNS`.
 
-    ⚠️ KHÔNG PHẢI file "Country Decompositions" (`ai_gpr_country_monthly.csv`,
-    `ai_gpr_bilateral_monthly.csv`, `ai_gpr_country_eventtype_monthly.csv`) —
-    ba file đó là dữ liệu KHÁC (theo nước/cặp nước/loại sự kiện), CHƯA tải,
-    CHƯA có loader (docs/16 §1 v1.2). File này chỉ là bản monthly của đúng
-    chỉ số tổng hợp mà `load_ai_gpr_daily()` đọc ở mức ngày.
+    ⚠️ KHÔNG PHẢI file "Country Decompositions" (`load_ai_gpr_eventtype_monthly`,
+    `load_ai_gpr_country_eventtype_monthly`, `load_ai_gpr_bilateral_monthly`
+    bên dưới) — đó là dữ liệu KHÁC (theo loại sự kiện/nước/cặp nước). File
+    này chỉ là bản monthly của đúng chỉ số tổng hợp mà `load_ai_gpr_daily()`
+    đọc ở mức ngày.
 
     Ghép vào `build_monthly_panel` theo đúng quy ước information-time
     (`align_monthly_gpr_to_information_time`) như GPR gốc — tháng M chỉ dùng
     được ở bucket M+1, KHÔNG join thẳng vào outcome cùng tháng (#9, #11).
     """
     return _load_ai_gpr(path, date_col, columns, index_name="month")
+
+
+# ---------------------------------------------------------------------------
+# AI-GPR "Country Decompositions" — docs/16 §1 v1.2/v1.3. BA file KHÁC chỉ số
+# tổng hợp ở trên (theo loại sự kiện / nước+loại sự kiện / cặp nước có hướng).
+# XÁC MINH 2026-08-05 trên file thật, tải tay (cùng nguyên tắc §1 phía trên).
+# ⚠️ CHƯA có `ai_gpr_country_monthly.csv` (200 nước × 4 vai) — file thứ 4
+# docs/16 §1 liệt kê, chưa tải, chưa xác minh, không có loader ở đây.
+# ---------------------------------------------------------------------------
+DEFAULT_AI_GPR_EVENTTYPE_MONTHLY = "data/ai_gpr_eventtype_monthly.csv"
+DEFAULT_AI_GPR_COUNTRY_EVENTTYPE_MONTHLY = "data/ai_gpr_country_eventtype_monthly.csv"
+DEFAULT_AI_GPR_BILATERAL_MONTHLY = "data/ai_gpr_bilateral_monthly.csv"
+
+# 8 loại sự kiện (xác minh trên `ai_gpr_eventtype_monthly.csv`, vintage
+# 2026-08-05) — CỘNG DỒN ĐÚNG về GPR_AI (kiểm tay: corr=0.9999999999976,
+# lệch tuyệt đối tối đa 0.0002 trên toàn mẫu 799 hàng) — KHÁC hẳn 8 cột
+# GPR_OIL_<vùng> ở `load_ai_gpr_daily/monthly` (KHÔNG cộng dồn về GPR_OIL,
+# xem cảnh báo cạnh AI_GPR_COLUMNS). Đây là taxonomy LOẠI SỰ KIỆN
+# (military_conflict/diplomatic_tension/terrorism/civil_war/nuclear_threat/
+# coup/sanctions/other) — KHÔNG PHẢI 4 kênh truyền dẫn energy/trade/
+# financial/military mà `gamma_lookup.py`/`vn_exposure.py` cần. Map 8→4
+# CHƯA làm — `sanctions`≈financial và `military_conflict`≈military là hai
+# cặp hiển nhiên; energy/trade KHÔNG có category tương ứng trực tiếp (không
+# có "energy" hay "trade" trong 8 loại này) — đây là quyết định thiết kế
+# CÒN MỞ, không tự bịa mapping.
+AI_GPR_EVENT_TYPES = (
+    "military_conflict", "diplomatic_tension", "terrorism", "civil_war",
+    "nuclear_threat", "coup", "sanctions", "other",
+)
+
+
+def load_ai_gpr_eventtype_monthly(
+    path: str = DEFAULT_AI_GPR_EVENTTYPE_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR toàn cầu theo 8 LOẠI SỰ KIỆN (không tách nước) -> wide, index=tháng.
+
+    Xác minh 2026-08-05 trên file thật (1960-01-01..2026-07-01, 799 hàng).
+    Cột: `AIGPR` (đối chiếu tổng) + 8 cột trong `AI_GPR_EVENT_TYPES`.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    need = [date_col, "GPR_AI", *AI_GPR_EVENT_TYPES]
+    missing = [c for c in need if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{path} thiếu cột {missing}. Cột thực tế: {list(df.columns)}. "
+            "Chạy describe_ai_gpr_file() rồi đối chiếu AI_GPR_EVENT_TYPES.")
+    out = df[need].rename(columns={date_col: "month", "GPR_AI": "AIGPR"})
+    out["month"] = pd.to_datetime(out["month"])
+    out = out.set_index("month").sort_index()
+    out.attrs["vintage"] = ai_gpr_vintage(path)
+    out.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return out
+
+
+def load_ai_gpr_country_eventtype_monthly(
+    path: str = DEFAULT_AI_GPR_COUNTRY_EVENTTYPE_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR theo NƯỚC × LOẠI SỰ KIỆN THÔ -> wide, index=tháng.
+
+    Xác minh 2026-08-05 (1960-01-01..2026-07-01, 799 hàng, 1602 cột =
+    Date + GPR_AI + 200 nước × 8 loại sự kiện, tên cột `{Nước}_{loại}` —
+    vd `Vietnam_military_conflict`; nước viết đầy đủ, có dấu cách với nước
+    ghép ("Saudi Arabia")). KHÔNG rename/tách hết 1600 cột ở đây (nặng
+    không cần thiết) — dùng `select_country_eventtype()` để lấy một nước.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế đầu "
+            f"tiên: {list(df.columns)[:5]}...")
+    df = df.rename(columns={date_col: "month"})
+    df["month"] = pd.to_datetime(df["month"])
+    df = df.set_index("month").sort_index()
+    df.attrs["vintage"] = ai_gpr_vintage(path)
+    df.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return df
+
+
+def select_country_eventtype(df: pd.DataFrame, country: str) -> pd.DataFrame:
+    """Trích 8 cột loại sự kiện của MỘT nước từ
+    `load_ai_gpr_country_eventtype_monthly()`, bỏ tiền tố tên nước.
+
+    Raise nếu nước không có trong file (KHÔNG trả DataFrame rỗng) — tên nước
+    sai chính tả mà lặng lẽ trả rỗng thì phân tích sau đó âm thầm chạy trên
+    dữ liệu trống.
+    """
+    cols = {f"{country}_{et}": et for et in AI_GPR_EVENT_TYPES}
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"Không tìm thấy nước {country!r} (thiếu cột {missing}). Kiểm tra "
+            "đúng chính tả/định dạng tên nước trong file gốc (vd 'Vietnam', "
+            "'Saudi Arabia', 'South Korea').")
+    return df[list(cols)].rename(columns=cols)
+
+
+def load_ai_gpr_bilateral_monthly(
+    path: str = DEFAULT_AI_GPR_BILATERAL_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR song phương CÓ HƯỚNG THÔ -> wide, index=tháng.
+
+    Xác minh 2026-08-05 (1960-01-01..2026-07-01, 799 hàng, 1202 cột =
+    Date + GPR_AI + 1.200 cặp nước, tên cột `{Actor}|{Target}` — CÓ HƯỚNG,
+    vd cả `USA|Vietnam` lẫn `Vietnam|USA` đều tồn tại RIÊNG. KHÔNG rename hết
+    1200 cột — dùng `select_bilateral_pair()` để lấy một cặp.
+
+    ⚠️ Dấu `|` KHÁC quy ước `pair_key()` của `indices.s_gpr` (dùng `>`) —
+    KHÔNG trộn lẫn hai định dạng; chuyển đổi tường minh ở nơi dùng nếu cần
+    khớp với chuỗi S-GPR nội bộ.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế đầu "
+            f"tiên: {list(df.columns)[:5]}...")
+    df = df.rename(columns={date_col: "month"})
+    df["month"] = pd.to_datetime(df["month"])
+    df = df.set_index("month").sort_index()
+    df.attrs["vintage"] = ai_gpr_vintage(path)
+    df.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return df
+
+
+def select_bilateral_pair(df: pd.DataFrame, actor: str, target: str) -> pd.Series:
+    """Trích MỘT cặp `actor|target` từ `load_ai_gpr_bilateral_monthly()`.
+
+    Raise nếu cặp không có trong 1.200 cặp top — im lặng trả rỗng sẽ biến
+    "không đủ dữ liệu cặp này" thành "GPR=0 suốt", hai ý nghĩa khác hẳn nhau.
+    """
+    col = f"{actor}|{target}"
+    if col not in df.columns:
+        raise KeyError(
+            f"Không tìm thấy cặp {col!r} trong 1.200 cặp top. Kiểm chính tả "
+            "tên nước, hoặc cặp này không đủ khối lượng để vào top 1.200.")
+    return df[col].rename(col)
 
 
 def transform_freight(raw: pd.Series) -> pd.Series:
