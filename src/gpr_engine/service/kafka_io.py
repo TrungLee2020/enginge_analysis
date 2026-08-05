@@ -38,22 +38,47 @@ class KafkaResultPublisher:
         self.publish_fn(topic, key, dict(value))
 
 
-def confluent_publisher(bootstrap_servers: str, **producer_config) -> KafkaResultPublisher:
+def confluent_publisher(bootstrap_servers: str, flush_timeout: float = 10.0,
+                        **producer_config) -> KafkaResultPublisher:
     """`KafkaResultPublisher` that, dung `confluent_kafka.Producer`.
 
     Import `confluent_kafka` LAZY — chi can khi thuc su goi ham nay (production
     entrypoint `scripts/run_news_service.py`), khong ep test/import khac phai
     co package.
+
+    `produce()` cua confluent-kafka la BAT DONG BO — goi xong khong co nghia
+    la da gui: neu khong dang ky `on_delivery` va khong `flush()`, mot loi
+    broker/topic (hoac ca tien trinh thoat truoc khi hang doi noi bo day het)
+    se lam MAT message MA KHONG CO DAU HIEU nao — im lang tuyet doi, khong
+    exception, khong log. `run_consumer_loop` xu ly TUNG message mot (khong
+    batch) nen doi `flush()` moi lan la dung: doi lay xac nhan GUI THAT truoc
+    khi tra ve, raise ro rang neu khong gui duoc — dung tinh than "sai la bao
+    loi ro" da ap dung cho cac phan khac cua pipeline nay.
     """
     from confluent_kafka import Producer
 
     producer = Producer({"bootstrap.servers": bootstrap_servers, **producer_config})
 
     def _publish(topic: str, key: str, value: dict) -> None:
+        delivery_errors: list[str] = []
+
+        def _on_delivery(err, msg):
+            if err is not None:
+                delivery_errors.append(str(err))
+
         producer.produce(topic, key=key.encode("utf-8"),
                          value=json.dumps(value, default=_json_default,
-                                          ensure_ascii=False).encode("utf-8"))
-        producer.poll(0)
+                                          ensure_ascii=False).encode("utf-8"),
+                         on_delivery=_on_delivery)
+        remaining = producer.flush(flush_timeout)
+        if remaining > 0:
+            raise RuntimeError(
+                f"Kafka publish tới topic {topic!r} không xác nhận được trong "
+                f"{flush_timeout}s ({remaining} message còn kẹt trong hàng đợi "
+                "nội bộ) — không rõ đã gửi hay chưa, không được coi là thành công.")
+        if delivery_errors:
+            raise RuntimeError(
+                f"Kafka publish tới topic {topic!r} thất bại: {delivery_errors[0]}")
 
     return KafkaResultPublisher(_publish)
 
