@@ -650,19 +650,76 @@ DEFAULT_AI_GPR_BILATERAL_MONTHLY = "data/ai_gpr_bilateral_monthly.csv"
 # 8 loại sự kiện (xác minh trên `ai_gpr_eventtype_monthly.csv`, vintage
 # 2026-08-05) — CỘNG DỒN ĐÚNG về GPR_AI (kiểm tay: corr=0.9999999999976,
 # lệch tuyệt đối tối đa 0.0002 trên toàn mẫu 799 hàng) — KHÁC hẳn 8 cột
-# GPR_OIL_<vùng> ở `load_ai_gpr_daily/monthly` (KHÔNG cộng dồn về GPR_OIL,
-# xem cảnh báo cạnh AI_GPR_COLUMNS). Đây là taxonomy LOẠI SỰ KIỆN
-# (military_conflict/diplomatic_tension/terrorism/civil_war/nuclear_threat/
-# coup/sanctions/other) — KHÔNG PHẢI 4 kênh truyền dẫn energy/trade/
-# financial/military mà `gamma_lookup.py`/`vn_exposure.py` cần. Map 8→4
-# CHƯA làm — `sanctions`≈financial và `military_conflict`≈military là hai
-# cặp hiển nhiên; energy/trade KHÔNG có category tương ứng trực tiếp (không
-# có "energy" hay "trade" trong 8 loại này) — đây là quyết định thiết kế
-# CÒN MỞ, không tự bịa mapping.
+# GPR_OIL_<vùng> ở `load_ai_gpr_daily/monthly` (KHÔNG cộng dồn về GPR_OIL —
+# CƠ CHẾ ĐÃ XÁC MINH qua AI_GPR_PAPER.pdf, đọc 2026-08-05: prompt phân loại
+# vùng cho phép chọn "one or more" vùng cho MỘT bài báo — bài nói về xung đột
+# ảnh hưởng cả Middle East lẫn Russia được cộng vào CẢ HAI tổng vùng nhưng chỉ
+# tính MỘT LẦN vào tổng GPR_OIL, nên tổng-các-vùng > GPR_OIL là kỳ vọng đúng,
+# không phải lỗi dữ liệu. Paper cũng xác nhận: prompt định nghĩa **13** vùng
+# gốc (Middle East/Russia/USA/Venezuela/North Africa/West Africa/Central Asia/
+# North Sea/Canada/Mexico/Latin America/Southeast Asia/China) — khớp đúng
+# "13 vùng" mà docs/16 v1.0 từng ghi; 8 cột trong file CSV công khai là bản
+# GOM NHÓM (Africa=North+West Africa, Americas=Canada+Mexico+Latin America,
+# Asia=Central Asia+Southeast Asia+China, 5 vùng còn lại giữ nguyên — khớp số
+# 5+2+3+3=13 — suy luận từ tên cột, chưa thấy paper nói thẳng cách gộp).
+#
+# Taxonomy LOẠI SỰ KIỆN (military_conflict/diplomatic_tension/terrorism/
+# civil_war/nuclear_threat/coup/sanctions/other) — paper định nghĩa nguyên
+# văn (Appendix A.6, prompt phân loại sự kiện): mô tả BẢN CHẤT hành động địa
+# chính trị, KHÔNG PHẢI 4 kênh truyền dẫn energy/trade/financial/military mà
+# `gamma_lookup.py`/`vn_exposure.py` cần — hai trục này TRỰC GIAO theo đúng
+# thiết kế của paper: định nghĩa "spillover" của paper liệt kê energy
+# shock/trade disruption như VÍ DỤ CƠ CHẾ lan tỏa, không phải một loại sự
+# kiện. Vì vậy KHÔNG có cách nào map 1-1 sạch — xem `EVENT_TYPE_TO_CHANNEL`
+# (đề xuất, CHƯA dùng trong production) ngay dưới đây.
 AI_GPR_EVENT_TYPES = (
     "military_conflict", "diplomatic_tension", "terrorism", "civil_war",
     "nuclear_threat", "coup", "sanctions", "other",
 )
+
+# ĐỀ XUẤT map 8 loại sự kiện -> 4 kênh truyền dẫn — CHƯA DÙNG Ở BẤT KỲ ĐƯỜNG
+# PRODUCTION NÀO (gamma_lookup.py vẫn chỉ dùng pooled/act/threat như cũ). Đây
+# là quyết định thiết kế cần XÁC NHẬN trước khi dùng, không phải sự thật đã
+# kiểm định — cùng tinh thần `CHANNEL_TO_TRANSMISSION` trong statement_scorer.py
+# (chỉ điền cặp hiển nhiên, còn lại None).
+#
+# Lý do từng dòng:
+#   military_conflict, civil_war, coup, nuclear_threat -> military: cả bốn
+#     đều là hành động/đe dọa VŨ TRANG trực tiếp — khớp định nghĩa "military"
+#     trong transmission-formulas.md §2 (xung đột vũ trang, triển khai quân).
+#   sanctions -> financial: khớp định nghĩa "financial" trong
+#     transmission-formulas.md §2 (trừng phạt tài chính, đóng băng tài sản) —
+#     ĐÃ có tiền lệ y hệt trong statement_scorer.CHANNEL_TO_TRANSMISSION
+#     (dù ở đó "sanction" từ chân B vẫn để None chờ chốt — ở đây chốt được vì
+#     ngữ cảnh khác: đây là loại sự kiện độc lập, không phải nhãn LLM chấm tin).
+#   terrorism, diplomatic_tension, other -> None: KHÔNG map. Terrorism có thể
+#     đánh vào hạ tầng năng lượng (energy) hoặc gây risk-off chung (financial)
+#     tùy mục tiêu — một nhãn không đủ phân biệt. Diplomatic tension là tiền
+#     thân của MỌI kênh, không riêng kênh nào. "other" là catch-all, theo
+#     định nghĩa không map được.
+#
+# ⚠️ QUAN TRỌNG NHẤT: taxonomy 8 loại KHÔNG có category "energy" hay "trade"
+# — đây không phải khoảng trống ngẫu nhiên mà là hệ quả thiết kế (xem cảnh báo
+# trên AI_GPR_EVENT_TYPES). Hai kênh đó PHẢI lấy từ nguồn khác, đã có sẵn
+# trong repo, KHÔNG suy ra từ 8 loại sự kiện:
+#   - energy: dùng trực tiếp `AIGPR_OIL`/`AIGPR_OIL_<vùng>` từ
+#     `load_ai_gpr_daily/monthly()` — dữ liệu CHUYÊN BIỆT cho oil/energy,
+#     không phải suy diễn từ event-type.
+#   - trade: dùng `load_ai_gpr_bilateral_monthly()` — paper (Section 5.3,
+#     6.x) VALIDATE trực tiếp chỉ số này bằng gravity equation, thấy GPR song
+#     phương cao hơn đi cùng THƯƠNG MẠI song phương thấp hơn — đây là bằng
+#     chứng thật cho việc bilateral index đo đúng kênh trade, không phải
+#     suy diễn.
+EVENT_TYPE_TO_CHANNEL: dict[str, str | None] = {
+    "military_conflict": "military",
+    "civil_war": "military",
+    "coup": "military",
+    "nuclear_threat": "military",
+    "sanctions": "financial",
+    "terrorism": None,
+    "diplomatic_tension": None,
+    "other": None,
+}
 
 
 def load_ai_gpr_eventtype_monthly(

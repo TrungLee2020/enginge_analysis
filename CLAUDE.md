@@ -41,7 +41,18 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-05)
+## Trạng thái hiện tại (cập nhật 2026-08-05, vòng 2)
+
+### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh
+
+Ba việc user yêu cầu làm liền ("làm từ 1 đến 3 luôn"), tất cả dựa trên dữ liệu/paper thật, không đoán — xem `docs/16` v1.6 để đọc đầy đủ:
+
+- **Task 3 (đọc `AI_GPR_PAPER.pdf`) giải quyết dứt điểm 2 câu hỏi mở của docs/16:** `GPR_AER` = chỉ số GPR keyword-based GỐC của chính Caldara-Iacoviello (2022), tính lại trên đúng 3 tờ báo mà AI-GPR dùng (để so sánh công bằng) — không phải GPRD gốc đầy đủ. Tương quan AI-GPR vs bản này = 0.69 theo paper, khớp 0.70 đo trên file thật. Cơ chế 8 vùng oil không cộng dồn về `GPR_OIL`: prompt phân loại vùng cho phép chọn "one or more" vùng/bài báo — thiết kế đúng, không phải lỗi. Bảng cũ "13 vùng" của v1.0 **đúng** theo paper (v1.1/v1.3 kết luận sai là "13 vùng chưa từng xác minh") — 8 cột CSV công khai là bản gộp nhóm từ 13 vùng gốc (Africa=North+West Africa, Americas=Canada+Mexico+Latin America, Asia=Central Asia+Southeast Asia+China).
+- **Task 2 (phân tích toàn mẫu vai trò VN, 1960-2026, 799 tháng, thay quan sát vài dòng trước đó):** câu "VN gần như luôn spillover" của docs/16 §3 **chỉ đúng cho giai đoạn 2015-2026** (spillover 67.4% biên độ, 64.7% số tháng) — **sai như phát biểu lịch sử chung**: 1960-1989 (thời chiến tranh Việt Nam) VN chủ yếu là `respondent` (57.1% biên độ, 63.3% số tháng), toàn mẫu 799 tháng respondent vẫn chiếm ưu thế (56.7% vs 17.9% spillover). Cơ chế hợp lý (VN chuyển từ "trong cuộc chiến" sang "nền kinh tế mở hứng sốc bên ngoài"), đường chuyển tiếp trơn qua 3 giai đoạn — không phải artifact chọn mốc. May mắn: giai đoạn spillover chiếm ưu thế (2015+) gần trùng Development+Validation window của dự án (2015-2023) — giả định `vn_exposure.py` hợp lý trong đúng cửa sổ dùng để ước lượng/validate, chỉ sai nếu khái quát ngược lịch sử xa. Số liệu đầy đủ ở `docs/16` §3.1 mới.
+- **Task 1 (đề xuất `EVENT_TYPE_TO_CHANNEL`, mới trong `data_files.py`, CHƯA dùng production):** 8 loại sự kiện AI-GPR **không có category tương ứng trực tiếp cho energy/trade** — `military_conflict`/`civil_war`/`coup`/`nuclear_threat`→`military`, `sanctions`→`financial`, còn `terrorism`/`diplomatic_tension`/`other`→`None` (chưa xác định, không đoán). Energy nên lấy từ `AIGPR_OIL_*` (đã có, daily), trade nên lấy từ bilateral index (đã có, monthly) — cả hai đã ingest, không cần suy ra từ event-type. Test khóa mapping không lệch khỏi `AI_GPR_EVENT_TYPES` thật + khóa phát hiện "không có energy/trade" (`tests/econ/test_ai_gpr_decompositions.py`).
+- **Việc code:** chỉ thêm hằng số + docstring lý do, KHÔNG đổi đường production nào (nguyên tắc #1 — chưa qua cổng kiểm định thì không vào service). 333 test pass.
+
+## Trạng thái trước đó (2026-08-05, vòng 1)
 
 ### 🐛 6 bug thật vá trong pipeline serving (rà lại sau khi ship) + ✅ AI-GPR daily xác minh trên file thật
 

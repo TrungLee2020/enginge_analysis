@@ -11,6 +11,7 @@ import pytest
 from gpr_engine.econometrics.data_files import (
     AI_GPR_EVENT_TYPES,
     AI_GPR_ROLES,
+    EVENT_TYPE_TO_CHANNEL,
     ai_gpr_vintage,
     load_ai_gpr_bilateral_monthly,
     load_ai_gpr_country_eventtype_monthly,
@@ -149,3 +150,27 @@ def test_select_country_role_unknown_country_raises(country_role_file):
 def test_country_role_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_ai_gpr_country_monthly(str(tmp_path / "nope.csv"))
+
+
+# ---------------------------------------------------------------------------
+# EVENT_TYPE_TO_CHANNEL — đề xuất map 8 loại sự kiện -> 4 kênh (CHƯA dùng
+# trong production, xem cảnh báo trong data_files.py). Test khóa mapping
+# không lệch khỏi AI_GPR_EVENT_TYPES thật (đổi 1 bên mà quên bên kia là bug).
+# ---------------------------------------------------------------------------
+def test_event_type_to_channel_covers_exactly_the_real_categories():
+    assert set(EVENT_TYPE_TO_CHANNEL) == set(AI_GPR_EVENT_TYPES)
+
+
+def test_event_type_to_channel_only_uses_known_channels():
+    known = {"energy", "trade", "financial", "military", None}
+    assert set(EVENT_TYPE_TO_CHANNEL.values()) <= known
+
+
+def test_event_type_to_channel_has_no_energy_or_trade_mapping():
+    """Phát hiện chính của Task 1: 8 loại sự kiện KHÔNG có category tương
+    ứng năng lượng/thương mại — energy lấy từ AIGPR_OIL, trade lấy từ
+    bilateral index, cả hai KHÔNG suy ra từ event-type. Test này khóa lại
+    phát hiện đó — nếu ai thêm "energy"/"trade" vào mapping sau này, phải
+    là quyết định có chủ đích, không phải quên."""
+    assert "energy" not in EVENT_TYPE_TO_CHANNEL.values()
+    assert "trade" not in EVENT_TYPE_TO_CHANNEL.values()
