@@ -1,7 +1,7 @@
-"""Test AI-GPR "Country Decompositions" (docs/16 §1 v1.2/v1.3) — 3 file
+"""Test AI-GPR "Country Decompositions" (docs/16 §1 v1.2-v1.4) — 4 file
 KHÁC chỉ số tổng hợp daily/monthly: theo loại sự kiện, nước×loại sự kiện,
-cặp nước có hướng. File TẢI TAY, không có dữ liệu thật trong repo nên test
-dùng fixture nhỏ khớp schema thật đã xác minh 2026-08-05.
+cặp nước có hướng, nước×vai trò. File TẢI TAY, không có dữ liệu thật trong
+repo nên test dùng fixture nhỏ khớp schema thật đã xác minh 2026-08-05.
 """
 from __future__ import annotations
 
@@ -10,12 +10,15 @@ import pytest
 
 from gpr_engine.econometrics.data_files import (
     AI_GPR_EVENT_TYPES,
+    AI_GPR_ROLES,
     ai_gpr_vintage,
     load_ai_gpr_bilateral_monthly,
     load_ai_gpr_country_eventtype_monthly,
+    load_ai_gpr_country_monthly,
     load_ai_gpr_eventtype_monthly,
     select_bilateral_pair,
     select_country_eventtype,
+    select_country_role,
 )
 
 
@@ -112,3 +115,37 @@ def test_select_bilateral_pair_unknown_pair_raises(bilateral_file):
 def test_bilateral_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_ai_gpr_bilateral_monthly(str(tmp_path / "nope.csv"))
+
+
+# ---------------------------------------------------------------------------
+# country × vai trò (all/initiator/respondent/spillover)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def country_role_file(tmp_path):
+    p = tmp_path / "ai_gpr_country_monthly.csv"
+    idx = _dates()
+    cols = {"Date": idx, "GPR_AI": range(len(idx))}
+    for country in ("Vietnam", "USA"):
+        for role in AI_GPR_ROLES:
+            cols[f"{country}_{role}"] = 5.0
+    pd.DataFrame(cols).to_csv(p, index=False)
+    return str(p)
+
+
+def test_select_country_role_extracts_one_country(country_role_file):
+    df = load_ai_gpr_country_monthly(country_role_file)
+    vn = select_country_role(df, "Vietnam")
+    assert list(vn.columns) == list(AI_GPR_ROLES)
+    assert (vn == 5.0).all().all()
+    assert "USA_all" not in vn.columns
+
+
+def test_select_country_role_unknown_country_raises(country_role_file):
+    df = load_ai_gpr_country_monthly(country_role_file)
+    with pytest.raises(KeyError, match="Không tìm thấy nước"):
+        select_country_role(df, "Atlantis")
+
+
+def test_country_role_missing_file_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_ai_gpr_country_monthly(str(tmp_path / "nope.csv"))

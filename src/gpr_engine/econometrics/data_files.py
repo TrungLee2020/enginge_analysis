@@ -783,6 +783,65 @@ def select_bilateral_pair(df: pd.DataFrame, actor: str, target: str) -> pd.Serie
     return df[col].rename(col)
 
 
+# File thứ 4 và cuối cùng trong danh sách "Country Decompositions" docs/16 §1 —
+# xác minh 2026-08-05. `all` = tổng, `initiator`/`respondent`/`spillover` CỘNG
+# DỒN ĐÚNG về `all` (kiểm tay trên Vietnam + USA, nhiều tháng: khớp tới 4 chữ
+# số thập phân) — cùng kiểu cộng dồn sạch với `AI_GPR_EVENT_TYPES`, khác 8 cột
+# oil-vùng không cộng dồn. Đây là file khớp THẲNG vào khung docs/16 §3
+# ("VN gần như luôn spillover") — `select_country_role(df, "Vietnam")
+# ["spillover"]` là chuỗi tháng đo đúng vai trò đó, không cần tự suy ra.
+DEFAULT_AI_GPR_COUNTRY_ROLE_MONTHLY = "data/ai_gpr_country_monthly.csv"
+AI_GPR_ROLES = ("all", "initiator", "respondent", "spillover")
+
+
+def load_ai_gpr_country_monthly(
+    path: str = DEFAULT_AI_GPR_COUNTRY_ROLE_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR theo NƯỚC × VAI TRÒ THÔ -> wide, index=tháng.
+
+    Xác minh 2026-08-05 (1960-01-01..2026-07-01, 799 hàng, 802 cột =
+    Date + GPR_AI + 200 nước × 4 vai, tên cột `{Nước}_{vai}` — vd
+    `Vietnam_spillover`). KHÔNG rename hết 800 cột — dùng
+    `select_country_role()` để lấy một nước.
+
+    ⚠️ ĐỪNG nhầm với `load_ai_gpr_country_eventtype_monthly()` — cùng 200
+    nước nhưng tách theo VAI TRÒ (all/initiator/respondent/spillover) ở đây,
+    theo LOẠI SỰ KIỆN (8 category) ở kia — hai trục khác nhau, hai file khác
+    nhau.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế đầu "
+            f"tiên: {list(df.columns)[:5]}...")
+    df = df.rename(columns={date_col: "month"})
+    df["month"] = pd.to_datetime(df["month"])
+    df = df.set_index("month").sort_index()
+    df.attrs["vintage"] = ai_gpr_vintage(path)
+    df.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return df
+
+
+def select_country_role(df: pd.DataFrame, country: str) -> pd.DataFrame:
+    """Trích 4 cột vai trò (`AI_GPR_ROLES`) của MỘT nước từ
+    `load_ai_gpr_country_monthly()`, bỏ tiền tố tên nước.
+
+    Raise nếu nước không có trong file — cùng lý do với
+    `select_country_eventtype`/`select_bilateral_pair`: không lặng lẽ trả rỗng.
+    """
+    cols = {f"{country}_{role}": role for role in AI_GPR_ROLES}
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"Không tìm thấy nước {country!r} (thiếu cột {missing}). Kiểm tra "
+            "đúng chính tả/định dạng tên nước trong file gốc.")
+    return df[list(cols)].rename(columns=cols)
+
+
 def transform_freight(raw: pd.Series) -> pd.Series:
     """Freight PPI (mức giá) -> Δln (log-return), giữ tên 'freight'.
 

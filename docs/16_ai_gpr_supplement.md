@@ -1,7 +1,9 @@
 # 16 — BỔ SUNG SAU AI-GPR (Iacoviello & Tong, 07/2026)
 
-**Phiên bản:** 1.4 — 2026-08-05 (v1.3/v1.2 cùng ngày, v1.1 — 2026-08-03, v1.0 cùng ngày)
-**Khác v1.3 — sau khi tải 3/4 file "Country Decompositions":** `ai_gpr_eventtype_monthly.csv` (global theo 8 loại sự kiện — **cộng dồn đúng về `GPR_AI`**, khác 8 cột oil-vùng không cộng dồn), `ai_gpr_country_eventtype_monthly.csv` (200 nước × 8 loại, Vietnam có đủ), `ai_gpr_bilateral_monthly.csv` (1200 cặp có hướng, nhiều cặp Vietnam). Thêm `load_ai_gpr_eventtype_monthly()`, `load_ai_gpr_country_eventtype_monthly()` + `select_country_eventtype()`, `load_ai_gpr_bilateral_monthly()` + `select_bilateral_pair()`. Còn thiếu đúng 1 file: `ai_gpr_country_monthly.csv` (200 nước × 4 vai).
+**Phiên bản:** 1.5 — 2026-08-05 (v1.4/v1.3/v1.2 cùng ngày, v1.1 — 2026-08-03, v1.0 cùng ngày)
+**Khác v1.4 — tải nốt file cuối cùng, ĐỦ 4/4 "Country Decompositions":** `ai_gpr_country_monthly.csv` (200 nước × 4 vai all/initiator/respondent/spillover) — cùng kiểu cộng dồn sạch với eventtype (`initiator+respondent+spillover = all`, kiểm tay lệch ≤0.0001). Thêm `load_ai_gpr_country_monthly()` + `select_country_role()`. **Lưu ý quan trọng cho §3**: soi nhanh Vietnam vài tháng gần nhất thấy KHÔNG "luôn luôn spillover" như khung docs/16 đặt ra — có tháng `respondent`>0. Quan sát nhỏ, chưa phải kết luận thống kê trên toàn mẫu — nhưng đủ để không lặp lại câu "VN gần như luôn spillover" như một sự thật đã kiểm, cho tới khi có phân tích đầy đủ.
+
+**Khác v1.3 — sau khi tải 3/4 file "Country Decompositions":** `ai_gpr_eventtype_monthly.csv` (global theo 8 loại sự kiện — **cộng dồn đúng về `GPR_AI`**, khác 8 cột oil-vùng không cộng dồn), `ai_gpr_country_eventtype_monthly.csv` (200 nước × 8 loại, Vietnam có đủ), `ai_gpr_bilateral_monthly.csv` (1200 cặp có hướng, nhiều cặp Vietnam). Thêm `load_ai_gpr_eventtype_monthly()`, `load_ai_gpr_country_eventtype_monthly()` + `select_country_eventtype()`, `load_ai_gpr_bilateral_monthly()` + `select_bilateral_pair()`.
 
 **Khác v1.2 — sau khi tải thêm file monthly:** `ai_gpr_data_monthly.csv` xác minh **CÙNG schema hệt bản daily** (vintage `92b9ba3bd38f`, 1960-01-01..2026-07-01, 799 hàng, cùng 8 vùng oil — KHÔNG phải 13 như v1.1 suy đoán, xem điểm (iii) dưới). Thêm `load_ai_gpr_monthly()`, dùng chung `AI_GPR_COLUMNS`/`_load_ai_gpr()` với bản daily.
 
@@ -29,16 +31,19 @@
 | GPR theo 8 loại sự kiện (global, không tách nước) | monthly | 1960–nay | ✅ đã tải, đã ingest (`load_ai_gpr_eventtype_monthly`) | ứng viên taxonomy kênh — xem cảnh báo dưới, KHÔNG map thẳng sang 4 kênh |
 | Country × 8 loại sự kiện (200 nước) | monthly | 1960–nay | ✅ đã tải, đã ingest (`load_ai_gpr_country_eventtype_monthly` + `select_country_eventtype`) — Vietnam có đủ 8 cột | ứng viên đo phơi nhiễm VN theo loại sự kiện |
 | Bilateral có hướng × 1.200 cặp | **monthly** (KHÔNG phải daily) | 1960–nay | ✅ đã tải, đã ingest (`load_ai_gpr_bilateral_monthly` + `select_bilateral_pair`) — nhiều cặp liên quan Vietnam (USA/China/Russia/Cambodia/Laos/Thailand...) | đo phơi nhiễm theo cặp, có hướng |
-| Country index × 200 nước × 4 vai (all/initiator/respondent/spillover) | **monthly** (KHÔNG phải daily — sửa §3 v1.1) | ? | ⏳ **CHƯA tải** (`ai_gpr_country_monthly.csv`) — file thứ 4, khác 3 file trên | country sub-index có sẵn vai trò — khớp thẳng VN=spillover, chưa làm được vì chưa có file |
+| Country index × 200 nước × 4 vai (all/initiator/respondent/spillover) | **monthly** (KHÔNG phải daily — sửa §3 v1.1) | 1960–nay | ✅ đã tải, đã ingest (`load_ai_gpr_country_monthly` + `select_country_role`) | country sub-index có sẵn vai trò — khớp thẳng VN=spillover (xem cảnh báo dưới) |
 | `GPR_AER`, `GPR_NONOIL` | daily + monthly | 1960–nay | ⚠️ có trong file, Ý NGHĨA CHƯA XÁC MINH | mới hoàn toàn — cần đọc `AI_GPR_PAPER.pdf` trước khi dùng |
 
-**Việc code — ĐÃ XONG cho CẢ daily/monthly chỉ số tổng hợp LẪN 3/4 file "Country Decompositions" (2026-08-05):**
+**✅ ĐỦ CẢ 4/4 FILE "Country Decompositions" — hoàn tất 2026-08-05.**
+
+**Việc code — ĐÃ XONG cho toàn bộ daily/monthly chỉ số tổng hợp + 4/4 file "Country Decompositions" (2026-08-05):**
 - `load_ai_gpr_daily()` + `load_ai_gpr_monthly()` (dùng chung `_load_ai_gpr()` + `AI_GPR_COLUMNS`).
 - `load_ai_gpr_eventtype_monthly()` — global theo 8 loại sự kiện. **Xác minh quan trọng**: 8 loại **cộng dồn ĐÚNG về `GPR_AI`** (kiểm tay trên 799 hàng: lệch tuyệt đối tối đa 0.0002) — KHÁC hẳn 8 cột `GPR_OIL_<vùng>` (không cộng dồn về `GPR_OIL`, cơ chế chưa rõ). Taxonomy: `military_conflict, diplomatic_tension, terrorism, civil_war, nuclear_threat, coup, sanctions, other` — **CHƯA map sang 4 kênh energy/trade/financial/military** mà `gamma_lookup.py` cần: `sanctions`≈financial và `military_conflict`≈military là 2 cặp hiển nhiên, còn energy/trade **không có category tương ứng trực tiếp** trong 8 loại này — quyết định thiết kế còn mở, không tự bịa.
+- `load_ai_gpr_country_monthly()` + `select_country_role()` — 4 vai `all/initiator/respondent/spillover` cũng **cộng dồn đúng** về `all` (kiểm tay Vietnam + USA nhiều tháng, lệch tối đa 0.0001). `select_country_role(df, "Vietnam")["spillover"]` là chuỗi tháng đo đúng khung docs/16 §3 ("VN gần như luôn spillover") — **⚠️ nhưng dữ liệu thật không hoàn toàn "gần như luôn"**: soi nhanh vài tháng gần nhất (2026-03..07) thấy Vietnam có cả tháng `respondent`>0 (vd 2026-04, 2026-07), không chỉ `spillover`. Đây là quan sát trên vài dòng, KHÔNG phải kết luận thống kê — muốn nói "VN luôn spillover X%" phải chạy phân tích đầy đủ trên toàn mẫu 1960-2026, chưa làm.
 - `load_ai_gpr_country_eventtype_monthly()` + `select_country_eventtype(df, "Vietnam")` — 1602 cột (200 nước × 8 loại), Vietnam xác nhận có đủ.
 - `load_ai_gpr_bilateral_monthly()` + `select_bilateral_pair(df, actor, target)` — 1200 cặp CÓ HƯỚNG (`Actor|Target`, dấu `|` KHÁC quy ước `pair_key()` của `indices.s_gpr` dùng `>`), nhiều cặp có Vietnam.
 
-**Còn thiếu:** `ai_gpr_country_monthly.csv` (200 nước × 4 vai — file duy nhất còn lại trong danh sách gốc §1) — chưa tải, chưa có loader.
+**Không còn file nào thiếu trong danh sách §1.** Toàn bộ 7 series AI-GPR đã biết (headline+threats/acts+oil-vùng ở daily/monthly, eventtype global, country×eventtype, bilateral, country×vai trò) đã tải, xác minh, có loader + test. Việc còn lại là NGHIÊN CỨU (map 8-loại-sự-kiện sang 4-kênh-truyền-dẫn, phân tích vai trò VN đầy đủ, đọc `AI_GPR_PAPER.pdf` cho `GPR_AER`/cơ chế oil-vùng), không phải tải thêm dữ liệu.
 
 **Giữ GPRD gốc** làm series đối chứng — E0 đã PASS trên nó, và tương quan AI-GPR vs GPR gốc chỉ 0.69, đủ khác để so sánh có ý nghĩa.
 
