@@ -75,6 +75,22 @@ JumpSeriesProvider = Callable[[pd.Timestamp], pd.Series]  # as_of -> chuoi JUMP 
 GammaLoader = Callable[[str], tuple[list[GammaCell], str]]  # gamma_channel -> (cells, file)
 
 
+def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Chuan hoa ve tz-aware UTC.
+
+    `statement_scorer.Statement.published_at` KHONG bat buoc co tzinfo (nhieu
+    test/caller da dung Timestamp naive tu truoc — xem tests/test_statement_scorer.py,
+    tests/test_chain_b_pipeline.py) nen KHONG sua contract cua Statement o day.
+    Nhung pipeline nay so sanh/join `as_of` voi cac chuoi tz-aware UTC tu
+    Postgres (`ext_series.available_at`, `statement_scores`) — tron naive voi
+    aware la `TypeError` cua pandas (da kiem chung), khong phai gia thuyet.
+    Day la RANH GIOI cua pipeline nay: gia dinh UTC khi thieu tzinfo, KHONG
+    raise — hop ly vi moi nguon du lieu con lai trong he thong nay (DB, test
+    fixture, `generated_at` mac dinh) deu la UTC.
+    """
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 @dataclass(frozen=True)
 class ExcludedResult:
     """Tin bi encoder loc — khong cham, khong tinh gi them (statement_scorer.score_statement trả None)."""
@@ -96,6 +112,8 @@ class NewsAssessment:
     ladder_state: int
     ladder_prev_state: int
     days_in_state: int
+    ladder_computed: bool           # False: ladder_state=0 la GIA TRI MAC
+                                    # DINH (tinh hong), KHONG phai S0 that
     jump: float
     jump_pctile: float
     chain_a_last_available: pd.Timestamp | None  # ngay moi nhat co du lieu GPRD
@@ -202,8 +220,14 @@ def process_news_item(
     score = score_statement(stmt, llm, config, encoder=encoder)
     if score is None:
         return ExcludedResult(stmt=stmt)
+    # score["published_at"] la ban sao THO cua stmt.published_at (co the naive
+    # — xem _as_utc). Chuan hoa NGAY tai day: no se duoc noi (pd.concat) voi
+    # `history` tz-aware trong _pair_indicator_frame, va pandas raise
+    # ValueError "Cannot mix tz-aware with tz-naive values" khi to_datetime()
+    # mot cot lan lon hai loai — da kiem chung, khong phai gia thuyet.
+    score["published_at"] = _as_utc(score["published_at"])
 
-    as_of = stmt.published_at.normalize()
+    as_of = _as_utc(stmt.published_at).normalize()
     jump_series = jump_series_provider(as_of)
     jump_val = float(jump_series.loc[as_of]) if as_of in jump_series.index else 0.0
     chain_a_last_available = jump_series.index.max() if len(jump_series) else None
@@ -245,6 +269,11 @@ def process_news_item(
     s_gpr_now = s_gpr_prev = s_gpr_pctile = 0.0
     ladder_state = ladder_prev_state = days_in_state = 0
     jump_pctile = 0.0
+    # True CHI SAU KHI ladder_state/days_in_state duoc tinh xong thanh cong —
+    # phan biet "ladder_state=0 vi that su S0" voi "ladder_state=0 vi tinh
+    # hong (vd role la)". process_news_item_live doc co nay de KHONG ghi de
+    # mot trang thai dung truoc do trong DB bang so 0 gia (xem store.py).
+    ladder_computed = False
 
     if pair_identified:
         try:
@@ -269,6 +298,7 @@ def process_news_item(
                 prior_states = ladder_df["state"].loc[:as_of]
                 ladder_prev_state = int(prior_states.iloc[-2]) if len(prior_states) >= 2 \
                     else ladder_state
+            ladder_computed = True
 
             # w(role) dung DUNG bang da dung de tinh s_gpr_now o tren (khong
             # hard-code — CLAUDE.md #7).
@@ -284,7 +314,8 @@ def process_news_item(
                 jump=jump_val, jump_pctile=jump_pctile, ladder_state=ladder_state,
                 ladder_prev_state=ladder_prev_state, days_in_state=max(days_in_state, 1),
                 detection_seconds=detection_seconds if detection_seconds is not None
-                else int((generated_at - stmt.published_at.to_pydatetime()).total_seconds()))
+                else int((generated_at - _as_utc(stmt.published_at).to_pydatetime())
+                        .total_seconds()))
             card_meta = {"published_at": stmt.published_at.isoformat(),
                         "model_version": config.model_version,
                         "rubric_version": config.rubric_version}
@@ -309,7 +340,8 @@ def process_news_item(
         gamma_channel=gamma_channel, transmission_channel=transmission_channel,
         s_gpr_now=s_gpr_now, s_gpr_prev=s_gpr_prev, s_gpr_pctile=s_gpr_pctile,
         ladder_state=ladder_state, ladder_prev_state=ladder_prev_state,
-        days_in_state=days_in_state, jump=jump_val, jump_pctile=jump_pctile,
+        days_in_state=days_in_state, ladder_computed=ladder_computed,
+        jump=jump_val, jump_pctile=jump_pctile,
         chain_a_last_available=chain_a_last_available, chain_a_stale=chain_a_stale,
         measurement_card=measurement_card, measurement_card_error=measurement_card_error,
         macro_brief=macro_brief, vn_note=vn_note_text, gamma_data_version=gamma_file,
@@ -340,7 +372,7 @@ def process_news_item_live(
     ladder_cfg = load_ladder_config(ladder_config_path)
 
     def history_provider(pair: str) -> pd.DataFrame:
-        return store.load_pair_history(engine, pair, before=stmt.published_at)
+        return store.load_pair_history(engine, pair, before=_as_utc(stmt.published_at))
 
     def jump_series_provider(as_of: pd.Timestamp) -> pd.Series:
         return store.load_jump_series(engine, as_of)
@@ -358,9 +390,12 @@ def process_news_item_live(
     if isinstance(result, ExcludedResult):
         return result
     store.insert_statement_score(engine, statement_id, result.score)
-    if result.pair_identified:
+    # CHI ghi khi ladder THAT SU tinh duoc (xem NewsAssessment.ladder_computed).
+    # Ghi vo dieu kien tren pair_identified se ghi de mot trang thai DUNG cua
+    # ngay hom do bang 0/S0 GIA khi lan xu ly nay hong (vd role la — #7).
+    if result.pair_identified and result.ladder_computed:
         pair = pair_key(result.score["actor_country"], result.score["target_country"])
-        store.upsert_ladder_state(engine, pair, stmt.published_at.normalize().date(),
+        store.upsert_ladder_state(engine, pair, _as_utc(stmt.published_at).normalize().date(),
                                   result.ladder_state, result.days_in_state,
                                   ladder_cfg.version)
     store.insert_news_assessment(engine, statement_id, result)

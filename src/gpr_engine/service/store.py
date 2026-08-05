@@ -25,6 +25,14 @@ JUMP_HISTORY_DAYS = 1095       # ~3 nam — du dem cho rolling window=250 cua ju
 JUMP_MIN_PERIODS = None        # None -> shocks.jump tu chon max(20, window//4)
 
 
+def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Chuan hoa ve tz-aware UTC truoc khi ghi TIMESTAMPTZ — cung ly do voi
+    `pipeline.news_pipeline._as_utc` (Statement.published_at co the naive,
+    ghi naive vao cot TIMESTAMPTZ phu thuoc session timezone cua Postgres,
+    khong dam bao la UTC). Nhan ban nho, khong tao module dung chung cho 1 dong."""
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 def get_engine(dsn: str) -> "Engine":
     from sqlalchemy import create_engine
     return create_engine(dsn)
@@ -36,18 +44,30 @@ def load_pair_history(engine: "Engine", pair: str, before: pd.Timestamp) -> pd.D
     Tra DataFrame khop `indices.s_gpr.REQUIRED_SCORE_COLS` — cot khong co gi
     thi tra DataFrame RONG cung khop schema, khong None (caller nap thang vao
     `s_gpr_pair` qua `pd.concat`).
+
+    `statement_scores` PK la (statement_id, model_version, rubric_version) —
+    MOT statement co the co NHIEU hang neu tung duoc cham lai voi model/rubric
+    khac (nang cap model chang han). `DISTINCT ON (s.id) ... ORDER BY s.id,
+    sc.scored_at DESC` lay dung BAN CHAM MOI NHAT cho moi statement — thieu no,
+    statement do vao S-GPR NHIEU LAN (mot lan/version), lam sai het rolling sum.
     """
     from sqlalchemy import text
 
     actor, target = pair.split(">")
     sql = text("""
-        SELECT s.published_at, s.source, sc.actor_country, sc.target_country,
-               sc.v, sc.specificity, s.speaker_role
-        FROM statements s
-        JOIN statement_scores sc ON sc.statement_id = s.id
-        WHERE sc.actor_country = :actor AND sc.target_country = :target
-          AND s.published_at < :before
-        ORDER BY s.published_at
+        SELECT published_at, source, actor_country, target_country, v,
+               specificity, speaker_role
+        FROM (
+            SELECT DISTINCT ON (s.id)
+                   s.id, s.published_at, s.source, sc.actor_country,
+                   sc.target_country, sc.v, sc.specificity, s.speaker_role
+            FROM statements s
+            JOIN statement_scores sc ON sc.statement_id = s.id
+            WHERE sc.actor_country = :actor AND sc.target_country = :target
+              AND s.published_at < :before
+            ORDER BY s.id, sc.scored_at DESC
+        ) latest
+        ORDER BY published_at
     """)
     with engine.connect() as conn:
         df = pd.read_sql(sql, conn, params={"actor": actor, "target": target,
@@ -65,6 +85,14 @@ def load_jump_series(engine: "Engine", as_of: pd.Timestamp) -> pd.Series:
 
     Chi dung hang co `available_at <= as_of` — dung `date` lam proxy la
     look-ahead bias (CLAUDE.md #11, khop `ingest/gpr_daily.py`).
+
+    `ext_series` PK la (series_id, date, data_version) — MOI LAN tai lai file
+    GPR va gan `data_version` moi (khuyen nghi da dua ra: "moi lan tai lai =
+    mot data_version moi") se tao THEM mot hang cho CUNG mot date. Khong loc,
+    truy van se tra ve hang TRUNG NGAY — series dua vao `shocks.jump()` (rolling
+    window tren VI TRI hang, khong phai tren ngay lich) se dem trung ngay
+    nhieu lan va lam sai het cua so rolling. `DISTINCT ON (date) ... ORDER BY
+    date, loaded_at DESC` lay dung ban ghi MOI NAP GAN NHAT cho moi ngay.
     """
     from sqlalchemy import text
 
@@ -72,8 +100,12 @@ def load_jump_series(engine: "Engine", as_of: pd.Timestamp) -> pd.Series:
 
     start = (as_of - pd.Timedelta(days=JUMP_HISTORY_DAYS)).date()
     sql = text("""
-        SELECT date, value FROM ext_series
-        WHERE series_id = 'GPRD' AND date >= :start AND available_at <= :as_of
+        SELECT date, value FROM (
+            SELECT DISTINCT ON (date) date, value
+            FROM ext_series
+            WHERE series_id = 'GPRD' AND date >= :start AND available_at <= :as_of
+            ORDER BY date, loaded_at DESC
+        ) latest
         ORDER BY date
     """)
     with engine.connect() as conn:
@@ -97,7 +129,7 @@ def insert_statement(engine: "Engine", stmt: "Statement") -> int:
     with engine.begin() as conn:
         row = conn.execute(sql, {
             "source": stmt.source, "url": stmt.url,
-            "published_at": stmt.published_at.to_pydatetime(),
+            "published_at": _as_utc(stmt.published_at).to_pydatetime(),
             "speaker": stmt.speaker, "speaker_role": stmt.speaker_role,
             "speaker_country": stmt.speaker_country, "text": stmt.text,
             "lang": stmt.lang, "cadence": stmt.cadence,
