@@ -55,7 +55,7 @@ def mocked_store(tmp_path):
                                         standardized=0.5, survived_holm=True,
                                         survived_battery=True)], "fake.csv")):
         m_engine.return_value = object()
-        yield {"ladder": m_ladder, "score": m_score, "assess": m_assess}
+        yield {"ladder": m_ladder, "score": m_score, "assess": m_assess, "engine": m_engine}
 
 
 def test_ladder_state_persisted_when_computation_succeeds(mocked_store):
@@ -78,3 +78,23 @@ def test_ladder_state_NOT_persisted_when_role_unknown(mocked_store):
     # nhung statement/score/assessment van phai duoc ghi — khong mat tin
     mocked_store["score"].assert_called_once()
     mocked_store["assess"].assert_called_once()
+
+
+def test_engine_created_lazily_when_not_injected_backward_compat(mocked_store):
+    """Khong tiem `engine=` -> ham tu goi store.get_engine(dsn) nhu truoc (goi
+    don le / test cu khong doi hanh vi)."""
+    process_news_item_live(_stmt(), "postgresql://fake", _llm, CONFIG)
+    mocked_store["engine"].assert_called_once_with("postgresql://fake")
+
+
+def test_injected_engine_reused_across_calls_no_new_pool_per_message(mocked_store):
+    """Bug da vá (audit production-readiness 2026-08-05): truoc ban va, MOI
+    lan goi ham nay (tuc MOI message Kafka trong run_news_service.py) tu tao
+    MOT SQLAlchemy engine moi qua store.get_engine(dsn) — connection pool moi
+    khong bao gio dispose, ro ri connection duoi tai lien tuc. Tiem `engine=`
+    co san (nhu run_news_service.main() lam MOT LAN cho ca vong doi consumer)
+    phai bo qua get_engine hoan toan, du goi nhieu lan."""
+    fake_engine = object()
+    process_news_item_live(_stmt(), "postgresql://fake", _llm, CONFIG, engine=fake_engine)
+    process_news_item_live(_stmt(), "postgresql://fake", _llm, CONFIG, engine=fake_engine)
+    mocked_store["engine"].assert_not_called()

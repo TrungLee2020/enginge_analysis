@@ -23,8 +23,12 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 from ..econometrics.ladder import (
     DEFAULT_LADDER_CONFIG,
@@ -357,18 +361,29 @@ def process_news_item_live(
     gamma_reports_dir: str = "docs/reports",
     ladder_config_path: str = str(DEFAULT_LADDER_CONFIG),
     chain_a_stale_after_days: int = DEFAULT_CHAIN_A_STALE_AFTER_DAYS,
+    engine: Engine | None = None,
 ) -> NewsAssessment | ExcludedResult:
     """Wrapper production: noi Postgres + file gamma that vao `process_news_item`.
 
     Nap lazy de import module nay khong ep phai co sqlalchemy/psycopg2 luc test
     (fakes trong test khong dung ham nay).
+
+    `engine`: TIEM SAN neu caller (vd `run_news_service.py`) da tao MOT engine
+    dung chung cho ca vong doi tien trinh — BAT BUOC voi Kafka consumer goi
+    ham nay MOI MESSAGE. Thieu tham so nay, ham tu goi `store.get_engine(dsn)`
+    o MOI LAN GOI -> tao connection pool SQLAlchemy MOI moi message, khong bao
+    gio dispose — ro ri connection, co the vet can Postgres `max_connections`
+    duoi tai lien tuc thuc te (bug tim thay khi audit production-readiness,
+    2026-08-05). `dsn` van bat buoc de tuong thich nguoc (test cu + goi don le
+    khong tiem engine van tu tao nhu truoc).
     """
     from pathlib import Path
 
     from ..service import store
     from .gamma_lookup import load_published_gamma
 
-    engine = store.get_engine(dsn)
+    if engine is None:
+        engine = store.get_engine(dsn)
     ladder_cfg = load_ladder_config(ladder_config_path)
 
     def history_provider(pair: str) -> pd.DataFrame:
