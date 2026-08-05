@@ -1,10 +1,12 @@
 # 16 — BỔ SUNG SAU AI-GPR (Iacoviello & Tong, 07/2026)
 
-**Phiên bản:** 1.2 — 2026-08-05 (v1.1 — 2026-08-03, v1.0 cùng ngày)
-**Khác v1.1 — sau khi TẢI THẬT file daily và đối chiếu trang download thật (chưa tải file monthly):**
+**Phiên bản:** 1.3 — 2026-08-05 (v1.2 cùng ngày, v1.1 — 2026-08-03, v1.0 cùng ngày)
+**Khác v1.2 — sau khi tải thêm file monthly:** `ai_gpr_data_monthly.csv` xác minh **CÙNG schema hệt bản daily** (vintage `92b9ba3bd38f`, 1960-01-01..2026-07-01, 799 hàng, cùng 8 vùng oil — KHÔNG phải 13 như v1.1 suy đoán, xem điểm (iii) dưới). Thêm `load_ai_gpr_monthly()`, dùng chung `AI_GPR_COLUMNS`/`_load_ai_gpr()` với bản daily.
+
+**Khác v1.1 — sau khi TẢI THẬT file daily và đối chiếu trang download thật:**
 (i) **Schema §1 đã xác minh trên file thật** (`ai_gpr_data_daily.csv`, vintage `13b8e8b48d41`, 1960-01-01..2026-07-31) — tên cột hoàn toàn khác giả định cũ, xem `data_files.py::AI_GPR_COLUMNS`;
 (ii) **⛔ Đính chính quan trọng: Country index và Bilateral KHÔNG phải daily.** Trang download thật liệt kê tường minh: `ai_gpr_country_monthly.csv`, `ai_gpr_bilateral_monthly.csv`, `ai_gpr_country_eventtype_monthly.csv` — tên file tự nói lên granularity. §3 v1.1 dùng "country index daily" làm tiền đề để kết luận "gỡ ràng buộc #10" — tiền đề đó **sai**, kết luận đó **rút lại**, xem §3 bản sửa;
-(iii) **Oil GPR theo vùng ĐÚNG là có ở daily** (điểm duy nhất bảng cũ đúng hướng) — nhưng file daily chỉ có **8 vùng** (MiddleEast/Russia/USA/Venezuela/Africa/Americas/Asia/NorthSea), không phải 13 như bảng cũ ghi; 13 vùng có thể là số ở bản monthly (chưa tải, chưa xác minh);
+(iii) **Oil GPR theo vùng ĐÚNG là có ở daily** (điểm duy nhất bảng cũ đúng hướng) — nhưng cả bản daily lẫn monthly đều chỉ có **8 vùng** (MiddleEast/Russia/USA/Venezuela/Africa/Americas/Asia/NorthSea), không phải 13 như bảng cũ ghi — "13 vùng" của v1.0/v1.1 là số **chưa từng xác minh**, giờ xác nhận sai trên cả hai file thật;
 (iv) Rủi ro "chỉ có 1 file latest bị ghi đè" nêu ở §1 v1.1 — **đã loại**: link tải có query `?v=<timestamp>` (cache-busting), tên file cố định qua các lần tải, `ai_gpr_vintage()` (hash file) vẫn là cách ghim đúng vì bản thân file thay đổi nội dung mỗi kỳ dù URL không đổi.
 
 **Loại:** doc **bổ sung**, không thay thế. docs/11, 14, 15 giữ nguyên trừ các mục ghi rõ dưới đây.
@@ -15,19 +17,21 @@
 
 ## 1. NGUỒN DỮ LIỆU MỚI — INGEST, KHÔNG BUILD
 
-**✅ Bảng dưới đã sửa theo trang download thật + file daily đã tải (2026-08-05).** Bảng v1.1 đoán granularity từ mô tả trang — sai ở 2/5 dòng. Đừng lặp lại lỗi đó: tin file/trang thật, không tin mô tả diễn giải lại.
+**✅ Bảng dưới đã sửa theo trang download thật + file daily VÀ monthly đã tải (2026-08-05).** Bảng v1.1 đoán granularity từ mô tả trang — sai ở 2/5 dòng. Đừng lặp lại lỗi đó: tin file/trang thật, không tin mô tả diễn giải lại.
 
 | Series | Tần suất THẬT | Phủ | Trạng thái | Thay thế việc gì trong plan cũ |
 |---|---|---|---|---|
-| AI-GPR headline (`GPR_AI`) | daily | 1960–nay | ✅ đã tải, đã ingest | chân A LLM scoring (docs/14 Phase 2 phần news) |
-| Threats/Acts (`THREATS_GPR_AI`/`ACTS_GPR_AI`) | daily | 1960–nay | ✅ đã tải, đã ingest | tách ACT/THREAT thô của `shocks.py` |
-| Oil GPR theo vùng (`GPR_OIL_*`, 8 vùng ở bản daily) | **daily** | 1960–nay | ✅ đã tải, đã ingest | channel routing kênh energy (docs/11 §5.3 giai đoạn 2) — ở mức DAILY, tốt hơn kỳ vọng ban đầu |
-| Country index × 200 nước × 4 vai | **monthly** (KHÔNG phải daily — sửa §3 v1.1) | ? | ⏳ chưa tải (`ai_gpr_country_monthly.csv`) | country sub-index — chỉ nâng cấp track THÁNG |
+| AI-GPR headline (`GPR_AI`) | daily + monthly (2 file riêng, cùng schema) | 1960–nay | ✅ đã tải cả hai, đã ingest | chân A LLM scoring (docs/14 Phase 2 phần news) |
+| Threats/Acts (`THREATS_GPR_AI`/`ACTS_GPR_AI`) | daily + monthly | 1960–nay | ✅ đã tải cả hai, đã ingest | tách ACT/THREAT thô của `shocks.py` |
+| Oil GPR theo vùng (`GPR_OIL_*`, **8** vùng — cả daily lẫn monthly, KHÔNG phải 13) | daily + monthly | 1960–nay | ✅ đã tải cả hai, đã ingest | channel routing kênh energy (docs/11 §5.3 giai đoạn 2) — ở mức DAILY, tốt hơn kỳ vọng ban đầu |
+| Country index × 200 nước × 4 vai | **monthly** (KHÔNG phải daily — sửa §3 v1.1) | ? | ⏳ chưa tải (`ai_gpr_country_monthly.csv`, file KHÁC với "AI-GPR monthly" ở trên) | country sub-index — chỉ nâng cấp track THÁNG |
 | Country × 8 loại sự kiện | **monthly** | ? | ⏳ chưa tải (`ai_gpr_country_eventtype_monthly.csv`) | ứng viên taxonomy kênh truyền dẫn — cần kiểm 8 loại có map sạch sang 4 kênh (energy/trade/financial/military) không |
 | Bilateral có hướng × 1.200 cặp | **monthly** (KHÔNG phải daily) | ? | ⏳ chưa tải (`ai_gpr_bilateral_monthly.csv`) | — mới hoàn toàn, nhưng chỉ ở mức tháng |
-| `GPR_AER`, `GPR_NONOIL` | daily | 1960–nay | ⚠️ có trong file, Ý NGHĨA CHƯA XÁC MINH | mới hoàn toàn — cần đọc `AI_GPR_PAPER.pdf` trước khi dùng |
+| `GPR_AER`, `GPR_NONOIL` | daily + monthly | 1960–nay | ⚠️ có trong file, Ý NGHĨA CHƯA XÁC MINH | mới hoàn toàn — cần đọc `AI_GPR_PAPER.pdf` trước khi dùng |
 
-**Việc code — ĐÃ XONG cho phần daily (2026-08-05):** `data_files.py::load_ai_gpr_daily()` + `AI_GPR_COLUMNS` (đã sửa khớp file thật) + `describe_ai_gpr_file()` + `ai_gpr_vintage()`. **Còn thiếu:** loader cho 3 file monthly ở trên — chưa viết, vì chưa có file thật để đối chiếu schema (cùng nguyên tắc "không đoán rồi để im" đã áp dụng cho bản daily).
+**Việc code — ĐÃ XONG cho CẢ daily và monthly CHỈ SỐ TỔNG HỢP (2026-08-05):** `data_files.py::load_ai_gpr_daily()` + `load_ai_gpr_monthly()` (dùng chung `_load_ai_gpr()` + `AI_GPR_COLUMNS`, vì `ai_gpr_data_monthly.csv` xác minh **cùng schema hệt daily**, chỉ khác tần suất — vintage `92b9ba3bd38f`, 1960-01-01..2026-07-01, 799 hàng) + `describe_ai_gpr_file()` + `ai_gpr_vintage()`.
+
+**Còn thiếu (KHÁC với chỉ số tổng hợp ở trên — đây là 3 file "Country Decompositions" riêng):** `ai_gpr_country_monthly.csv`, `ai_gpr_country_eventtype_monthly.csv`, `ai_gpr_bilateral_monthly.csv` — chưa tải, chưa có loader, cùng nguyên tắc "không đoán rồi để im" đã áp dụng cho bản daily/monthly ở trên.
 
 **Giữ GPRD gốc** làm series đối chứng — E0 đã PASS trên nó, và tương quan AI-GPR vs GPR gốc chỉ 0.69, đủ khác để so sánh có ý nghĩa.
 

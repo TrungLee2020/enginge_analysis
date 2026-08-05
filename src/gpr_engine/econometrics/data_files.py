@@ -479,9 +479,17 @@ FRED_FREIGHT = "PCU483111483111"
 #     nhieu hang — vd hang 2026-07-31: tong 8 vung = 908.44 nhung
 #     GPR_OIL=628.92) — co the trung lap vung hoac GPR_OIL tinh rieng, chua
 #     ro co che, dung suy dien tong hop khi chua doc paper.
+# ✅ Ban MONTHLY xac minh 2026-08-05, tai tu
+# matteoiacoviello.com/ai_gpr_files/ai_gpr_data_monthly.csv, vintage
+# 92b9ba3bd38f, 1960-01-01 .. 2026-07-01, 799 hang. CUNG SCHEMA voi ban daily
+# (cung 15 cot, chi khac tan suat) — dung chung AI_GPR_COLUMNS, load qua
+# `load_ai_gpr_monthly()`. Day KHONG PHAI file "Country Decompositions" (
+# ai_gpr_country_monthly.csv / ai_gpr_bilateral_monthly.csv /
+# ai_gpr_country_eventtype_monthly.csv) — 3 file do CHUA tai, CHUA co loader.
+DEFAULT_AI_GPR_MONTHLY = "data/ai_gpr_data_monthly.csv"
 DEFAULT_AI_GPR_DAILY = "data/ai_gpr_data_daily.csv"
 
-AI_GPR_COLUMNS = {          # ten that trong file -> ten dung trong repo
+AI_GPR_COLUMNS = {          # ten that trong file -> ten dung trong repo (CA daily lan monthly)
     "GPR_AI": "AIGPR",
     "GPR_AER": "AIGPR_AER",              # nghia chua xac minh — xem canh bao tren
     "GPR_OIL": "AIGPR_OIL",
@@ -543,6 +551,40 @@ def ai_gpr_vintage(path: str = DEFAULT_AI_GPR_DAILY) -> str | None:
     return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
 
 
+def _load_ai_gpr(
+    path: str,
+    date_col: str,
+    columns: Mapping[str, str] | None,
+    index_name: str,
+) -> pd.DataFrame:
+    """Loi chung cho ban daily va monthly — CUNG mot schema (AI_GPR_COLUMNS),
+    chi khac tan suat/path. Khong xuat cong khai — dung qua
+    `load_ai_gpr_daily`/`load_ai_gpr_monthly`.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    mapping = dict(AI_GPR_COLUMNS if columns is None else columns)
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế: "
+            f"{list(df.columns)}. Chạy describe_ai_gpr_file() rồi truyền date_col.")
+    missing = [c for c in mapping if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{path} thiếu cột {missing} (AI_GPR_COLUMNS chưa xác minh trên file "
+            f"thật — docs/16 §1). Cột thực tế: {list(df.columns)}. Đối chiếu bằng "
+            "describe_ai_gpr_file() rồi sửa AI_GPR_COLUMNS hoặc truyền `columns`.")
+    out = df[[date_col, *mapping]].rename(columns=mapping)
+    out[date_col] = pd.to_datetime(out[date_col])
+    out = out.set_index(date_col).sort_index()
+    out.index.name = index_name
+    out.attrs["vintage"] = ai_gpr_vintage(path)
+    out.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return out
+
+
 def load_ai_gpr_daily(
     path: str = DEFAULT_AI_GPR_DAILY,
     date_col: str = "Date",
@@ -569,28 +611,29 @@ def load_ai_gpr_daily(
     bằng 0. Ngưỡng JUMP q95/q99 rolling **phải hiệu chuẩn lại** — không bê thẳng
     tham số đã dùng cho GPRD sang.
     """
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
-    mapping = dict(AI_GPR_COLUMNS if columns is None else columns)
-    df = pd.read_csv(p)
-    if date_col not in df.columns:
-        raise ValueError(
-            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế: "
-            f"{list(df.columns)}. Chạy describe_ai_gpr_file() rồi truyền date_col.")
-    missing = [c for c in mapping if c not in df.columns]
-    if missing:
-        raise ValueError(
-            f"{path} thiếu cột {missing} (AI_GPR_COLUMNS chưa xác minh trên file "
-            f"thật — docs/16 §1). Cột thực tế: {list(df.columns)}. Đối chiếu bằng "
-            "describe_ai_gpr_file() rồi sửa AI_GPR_COLUMNS hoặc truyền `columns`.")
-    out = df[[date_col, *mapping]].rename(columns=mapping)
-    out[date_col] = pd.to_datetime(out[date_col])
-    out = out.set_index(date_col).sort_index()
-    out.index.name = "date"
-    out.attrs["vintage"] = ai_gpr_vintage(path)
-    out.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
-    return out
+    return _load_ai_gpr(path, date_col, columns, index_name="date")
+
+
+def load_ai_gpr_monthly(
+    path: str = DEFAULT_AI_GPR_MONTHLY,
+    date_col: str = "Date",
+    columns: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """AI-GPR monthly THÔ -> wide, index=đầu tháng. CÙNG schema với bản daily
+    (xác minh 2026-08-05, vintage `92b9ba3bd38f`) — chỉ khác tần suất, tái
+    dùng `AI_GPR_COLUMNS`.
+
+    ⚠️ KHÔNG PHẢI file "Country Decompositions" (`ai_gpr_country_monthly.csv`,
+    `ai_gpr_bilateral_monthly.csv`, `ai_gpr_country_eventtype_monthly.csv`) —
+    ba file đó là dữ liệu KHÁC (theo nước/cặp nước/loại sự kiện), CHƯA tải,
+    CHƯA có loader (docs/16 §1 v1.2). File này chỉ là bản monthly của đúng
+    chỉ số tổng hợp mà `load_ai_gpr_daily()` đọc ở mức ngày.
+
+    Ghép vào `build_monthly_panel` theo đúng quy ước information-time
+    (`align_monthly_gpr_to_information_time`) như GPR gốc — tháng M chỉ dùng
+    được ở bucket M+1, KHÔNG join thẳng vào outcome cùng tháng (#9, #11).
+    """
+    return _load_ai_gpr(path, date_col, columns, index_name="month")
 
 
 def transform_freight(raw: pd.Series) -> pd.Series:

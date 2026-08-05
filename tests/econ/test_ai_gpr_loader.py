@@ -17,6 +17,7 @@ from gpr_engine.econometrics.data_files import (
     ai_gpr_vintage,
     describe_ai_gpr_file,
     load_ai_gpr_daily,
+    load_ai_gpr_monthly,
 )
 
 
@@ -94,3 +95,21 @@ def test_custom_columns_override(tmp_path):
     df = load_ai_gpr_daily(str(p),
                            columns={"ai_gpr": "AIGPR", "ai_gpr_threat": "AIGPR_THREAT"})
     assert list(df.columns) == ["AIGPR", "AIGPR_THREAT"]
+
+
+def test_monthly_loader_same_schema_different_index_name(tmp_path):
+    """Bản monthly (xác minh 2026-08-05, vintage 92b9ba3bd38f) CÙNG schema với
+    daily — chỉ khác index.name ('month' thay vì 'date') để phân biệt tần suất
+    khi ghép vào build_monthly_panel."""
+    p = tmp_path / "ai_gpr_data_monthly.csv"
+    _write(p, dict.fromkeys(AI_GPR_COLUMNS), n=24)
+    df = load_ai_gpr_monthly(str(p))
+    assert list(df.columns) == list(AI_GPR_COLUMNS.values())
+    assert df.index.name == "month"
+    assert df.attrs["vintage"] == ai_gpr_vintage(str(p))
+
+
+def test_monthly_missing_file_gives_actionable_instructions(tmp_path):
+    with pytest.raises(FileNotFoundError) as e:
+        load_ai_gpr_monthly(str(tmp_path / "nope.csv"))
+    assert "describe_ai_gpr_file" in str(e.value)
