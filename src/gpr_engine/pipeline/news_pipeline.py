@@ -62,11 +62,33 @@ from .vn_exposure import vn_exposure_note
 DEFAULT_S_GPR_WINDOW = 7
 DEFAULT_MIN_PERIODS = 60
 MACRO_OUTCOMES = {"oil", "dxy", "vix", "us10y", "ip", "cpi", "infl_exp", "freight"}
+# Nguon GPR (Caldara-Iacoviello) xac nhan cap nhat ~1 lan/thang (quanh ngay 10,
+# https://www.policyuncertainty.com/gpr.html) cho ban quoc gia/thang; ban DAILY
+# (GPRD, dung o day) CHUA xac nhan duoc cadence that (trang chinh chan fetch tu
+# dong). 35 ngay = ~1 chu ky thang + dem — CHINH LAI cho khop cadence THAT ban
+# quan sat duoc sau khi van hanh, dung dung so nay lam chan ly.
+DEFAULT_CHAIN_A_STALE_AFTER_DAYS = 35
 
 # Callable tiem vao — production doc that tu Postgres/file, test dung fake.
 HistoryProvider = Callable[[str], pd.DataFrame]           # pair -> lich su statement_scores
 JumpSeriesProvider = Callable[[pd.Timestamp], pd.Series]  # as_of -> chuoi JUMP tho (chain A)
 GammaLoader = Callable[[str], tuple[list[GammaCell], str]]  # gamma_channel -> (cells, file)
+
+
+def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """Chuan hoa ve tz-aware UTC.
+
+    `statement_scorer.Statement.published_at` KHONG bat buoc co tzinfo (nhieu
+    test/caller da dung Timestamp naive tu truoc — xem tests/test_statement_scorer.py,
+    tests/test_chain_b_pipeline.py) nen KHONG sua contract cua Statement o day.
+    Nhung pipeline nay so sanh/join `as_of` voi cac chuoi tz-aware UTC tu
+    Postgres (`ext_series.available_at`, `statement_scores`) — tron naive voi
+    aware la `TypeError` cua pandas (da kiem chung), khong phai gia thuyet.
+    Day la RANH GIOI cua pipeline nay: gia dinh UTC khi thieu tzinfo, KHONG
+    raise — hop ly vi moi nguon du lieu con lai trong he thong nay (DB, test
+    fixture, `generated_at` mac dinh) deu la UTC.
+    """
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
 
 @dataclass(frozen=True)
@@ -90,8 +112,13 @@ class NewsAssessment:
     ladder_state: int
     ladder_prev_state: int
     days_in_state: int
+    ladder_computed: bool           # False: ladder_state=0 la GIA TRI MAC
+                                    # DINH (tinh hong), KHONG phai S0 that
     jump: float
     jump_pctile: float
+    chain_a_last_available: pd.Timestamp | None  # ngay moi nhat co du lieu GPRD
+    chain_a_stale: bool             # True: JUMP=0/S4 khong len co the do THIEU
+                                    # du lieu chain-A, khong phai do that su yen
     measurement_card: str | None   # None neu khong xac dinh duoc actor/target
     measurement_card_error: str | None  # ly do card=None khi CO xac dinh pair
                                         # nhung Guard P1/tran claim chan (vd
@@ -109,6 +136,8 @@ class NewsAssessment:
         d["speaker"] = self.stmt.speaker
         d["speaker_role"] = self.stmt.speaker_role
         d["generated_at"] = self.generated_at.isoformat(timespec="seconds")
+        d["chain_a_last_available"] = (self.chain_a_last_available.isoformat()
+                                       if self.chain_a_last_available is not None else None)
         d["v"] = self.score["v"]
         d["channel"] = self.score["channel"]
         d["commitment"] = self.score["commitment"]
@@ -163,6 +192,7 @@ def process_news_item(
     min_periods: int = DEFAULT_MIN_PERIODS,
     detection_seconds: int | None = None,
     now: dt.datetime | None = None,
+    chain_a_stale_after_days: int = DEFAULT_CHAIN_A_STALE_AFTER_DAYS,
 ) -> NewsAssessment | ExcludedResult:
     """Xu ly MOT tin: cham -> S-GPR/Ladder -> gamma tang 2 -> VN tang 3 -> compose.
 
@@ -174,11 +204,35 @@ def process_news_item(
     den `as_of`, dung tinh phan vi tai cho (`caller tinh percentile`, dung tinh
     than econometrics.ladder — ladder chi so sanh nguong, khong tu tinh).
     `gamma_loader(gamma_channel)`: tra (danh sach GammaCell, ten file da doc).
+
+    Hai suy giam co kiem soat (khong crash, khong am tham mat tin):
+    - `speaker_role` la ma bang trong so w(role) (`DEFAULT_ROLE_WEIGHTS_INIT`
+      hoac `role_weights` tiem vao) -> `measurement_card=None` +
+      `measurement_card_error` ghi ro ly do, S-GPR/Ladder cho tin nay bi bo
+      qua (khong the tinh w(role)), nhung gamma/VN note van phat binh thuong.
+    - chain A (GPRD) khong co du lieu toi `as_of` (qua `chain_a_stale_after_days`
+      ngay so voi ban ghi moi nhat) -> `chain_a_stale=True`, ghi vao
+      `sample_caveat` cua macro_brief. JUMP/Ladder S4 khi do co the chi phan
+      anh "thieu du lieu", KHONG phai "that su yen ang" — dung doc hai ca do
+      nhu nhau.
     """
     generated_at = now or dt.datetime.now(dt.timezone.utc)
     score = score_statement(stmt, llm, config, encoder=encoder)
     if score is None:
         return ExcludedResult(stmt=stmt)
+    # score["published_at"] la ban sao THO cua stmt.published_at (co the naive
+    # — xem _as_utc). Chuan hoa NGAY tai day: no se duoc noi (pd.concat) voi
+    # `history` tz-aware trong _pair_indicator_frame, va pandas raise
+    # ValueError "Cannot mix tz-aware with tz-naive values" khi to_datetime()
+    # mot cot lan lon hai loai — da kiem chung, khong phai gia thuyet.
+    score["published_at"] = _as_utc(score["published_at"])
+
+    as_of = _as_utc(stmt.published_at).normalize()
+    jump_series = jump_series_provider(as_of)
+    jump_val = float(jump_series.loc[as_of]) if as_of in jump_series.index else 0.0
+    chain_a_last_available = jump_series.index.max() if len(jump_series) else None
+    chain_a_stale = (chain_a_last_available is None
+                     or (as_of - chain_a_last_available).days > chain_a_stale_after_days)
 
     gamma_channel = commitment_to_gamma_channel(score["commitment"])
     gamma_cells, gamma_file = gamma_loader(gamma_channel)
@@ -186,18 +240,27 @@ def process_news_item(
     transmission_channel = to_transmission_channel(score["channel"])
     vn = vn_exposure_note(transmission_channel)
 
+    sample_caveat = ("γ tầng 2 chưa tách theo kênh truyền dẫn "
+                     "energy/trade/financial/military — dùng proxy "
+                     "commitment→channel(pooled/act/threat), xem "
+                     "pipeline/gamma_lookup.py")
+    if chain_a_stale:
+        last_str = (chain_a_last_available.date().isoformat()
+                   if chain_a_last_available is not None else "chưa có dữ liệu")
+        sample_caveat += (f" · ⚠️ chain A (GPRD) mới nhất {last_str}, quá "
+                          f"{chain_a_stale_after_days} ngày so với tin này — "
+                          "JUMP/Ladder S4 có thể im lặng vì THIẾU dữ liệu, "
+                          "không phải vì thật sự yên ắng.")
     meta = {"generated_at": generated_at.isoformat(timespec="seconds"),
             "data_version": gamma_file, "git_commit": "n/a",
-            "n_obs": len(gamma_cells),
-            "sample_caveat": "γ tầng 2 chưa tách theo kênh truyền dẫn "
-                              "energy/trade/financial/military — dùng proxy "
-                              "commitment→channel(pooled/act/threat), xem "
-                              "pipeline/gamma_lookup.py"}
+            "n_obs": len(gamma_cells), "sample_caveat": sample_caveat}
     trigger = {"label": f"tin: {stmt.source}/{stmt.speaker}",
                "reason": f"v={score['v']:+.2f}, commitment={score['commitment']}, "
                          f"channel={score['channel']}"}
     macro_brief = compose_model_brief(
-        trigger, gamma_cells, [], {"v": score["v"]}, meta, skipped=[])
+        trigger, gamma_cells, [], {"v": score["v"],
+                                   "chain_a_stale_after_days": chain_a_stale_after_days},
+        meta, skipped=[])
     vn_note_text = compose_vn_note(vn, {"generated_at": meta["generated_at"]})
 
     pair_identified = bool(score["actor_country"] and score["target_country"])
@@ -205,57 +268,66 @@ def process_news_item(
     measurement_card_error = None
     s_gpr_now = s_gpr_prev = s_gpr_pctile = 0.0
     ladder_state = ladder_prev_state = days_in_state = 0
-    jump_val = jump_pctile = 0.0
-
-    as_of = stmt.published_at.normalize()
-    jump_series = jump_series_provider(as_of)
-    if as_of in jump_series.index:
-        jump_val = float(jump_series.loc[as_of])
+    jump_pctile = 0.0
+    # True CHI SAU KHI ladder_state/days_in_state duoc tinh xong thanh cong —
+    # phan biet "ladder_state=0 vi that su S0" voi "ladder_state=0 vi tinh
+    # hong (vd role la)". process_news_item_live doc co nay de KHONG ghi de
+    # mot trang thai dung truoc do trong DB bang so 0 gia (xem store.py).
+    ladder_computed = False
 
     if pair_identified:
-        pair = pair_key(score["actor_country"], score["target_country"])
-        history = history_provider(pair)
-        indicators, s_gpr_series = _pair_indicator_frame(
-            history, score, jump_series, s_gpr_window, min_periods, role_weights)
-
-        s_gpr_now = float(s_gpr_series.loc[as_of]) if as_of in s_gpr_series.index else 0.0
-        prior = s_gpr_series.loc[:as_of]
-        s_gpr_prev = float(prior.iloc[-2]) if len(prior) >= 2 else 0.0
-        s_gpr_pctile = float(indicators["s_gpr_pair_pct"].loc[as_of]) \
-            if as_of in indicators.index and pd.notna(indicators["s_gpr_pair_pct"].loc[as_of]) else 0.0
-        jump_pctile = float(indicators["jump_pct"].loc[as_of]) \
-            if as_of in indicators.index and pd.notna(indicators["jump_pct"].loc[as_of]) else 0.0
-
-        cfg = ladder_config or load_ladder_config(DEFAULT_LADDER_CONFIG)
-        ladder_df = classify_ladder(indicators, cfg)
-        if as_of in ladder_df.index:
-            ladder_state = int(ladder_df["state"].loc[as_of])
-            days_in_state = int(ladder_df["days_in_state"].loc[as_of])
-            prior_states = ladder_df["state"].loc[:as_of]
-            ladder_prev_state = int(prior_states.iloc[-2]) if len(prior_states) >= 2 \
-                else ladder_state
-
-        # w(role) DUNG DUNG bang da dung de tinh s_gpr_now o tren (khong hard-
-        # code — CLAUDE.md #7). _pair_indicator_frame da goi s_gpr_pair thanh
-        # cong voi role nay nen tra cuu o day KHONG the KeyError.
-        weights = role_weights or DEFAULT_ROLE_WEIGHTS_INIT
-        actor_weight = weights[stmt.speaker_role]
-        event = {"headline": score["rationale"], "source": stmt.source,
-                 "url": stmt.url or "—", "actor": score["actor_country"],
-                 "target": score["target_country"], "channel": score["channel"] or "—",
-                 "commitment": score["commitment"], "role": stmt.speaker_role}
-        payload = MeasurementPayload(
-            v=score["v"], specificity=score["specificity"], actor_weight=actor_weight,
-            s_gpr_now=s_gpr_now, s_gpr_prev=s_gpr_prev, s_gpr_pctile=s_gpr_pctile,
-            jump=jump_val, jump_pctile=jump_pctile, ladder_state=ladder_state,
-            ladder_prev_state=ladder_prev_state, days_in_state=max(days_in_state, 1),
-            detection_seconds=detection_seconds if detection_seconds is not None
-            else int((generated_at - stmt.published_at.to_pydatetime()).total_seconds()))
-        card_meta = {"published_at": stmt.published_at.isoformat(),
-                     "model_version": config.model_version,
-                     "rubric_version": config.rubric_version}
         try:
+            pair = pair_key(score["actor_country"], score["target_country"])
+            history = history_provider(pair)
+            indicators, s_gpr_series = _pair_indicator_frame(
+                history, score, jump_series, s_gpr_window, min_periods, role_weights)
+
+            s_gpr_now = float(s_gpr_series.loc[as_of]) if as_of in s_gpr_series.index else 0.0
+            prior = s_gpr_series.loc[:as_of]
+            s_gpr_prev = float(prior.iloc[-2]) if len(prior) >= 2 else 0.0
+            s_gpr_pctile = float(indicators["s_gpr_pair_pct"].loc[as_of]) \
+                if as_of in indicators.index and pd.notna(indicators["s_gpr_pair_pct"].loc[as_of]) else 0.0
+            jump_pctile = float(indicators["jump_pct"].loc[as_of]) \
+                if as_of in indicators.index and pd.notna(indicators["jump_pct"].loc[as_of]) else 0.0
+
+            cfg = ladder_config or load_ladder_config(DEFAULT_LADDER_CONFIG)
+            ladder_df = classify_ladder(indicators, cfg)
+            if as_of in ladder_df.index:
+                ladder_state = int(ladder_df["state"].loc[as_of])
+                days_in_state = int(ladder_df["days_in_state"].loc[as_of])
+                prior_states = ladder_df["state"].loc[:as_of]
+                ladder_prev_state = int(prior_states.iloc[-2]) if len(prior_states) >= 2 \
+                    else ladder_state
+            ladder_computed = True
+
+            # w(role) dung DUNG bang da dung de tinh s_gpr_now o tren (khong
+            # hard-code — CLAUDE.md #7).
+            weights = role_weights or DEFAULT_ROLE_WEIGHTS_INIT
+            actor_weight = weights[stmt.speaker_role]
+            event = {"headline": score["rationale"], "source": stmt.source,
+                     "url": stmt.url or "—", "actor": score["actor_country"],
+                     "target": score["target_country"], "channel": score["channel"] or "—",
+                     "commitment": score["commitment"], "role": stmt.speaker_role}
+            payload = MeasurementPayload(
+                v=score["v"], specificity=score["specificity"], actor_weight=actor_weight,
+                s_gpr_now=s_gpr_now, s_gpr_prev=s_gpr_prev, s_gpr_pctile=s_gpr_pctile,
+                jump=jump_val, jump_pctile=jump_pctile, ladder_state=ladder_state,
+                ladder_prev_state=ladder_prev_state, days_in_state=max(days_in_state, 1),
+                detection_seconds=detection_seconds if detection_seconds is not None
+                else int((generated_at - _as_utc(stmt.published_at).to_pydatetime())
+                        .total_seconds()))
+            card_meta = {"published_at": stmt.published_at.isoformat(),
+                        "model_version": config.model_version,
+                        "rubric_version": config.rubric_version}
             measurement_card = compose_measurement_card(event, payload, card_meta)
+        except KeyError as e:
+            # speaker_role (cua tin nay HOAC cua mot ban ghi lich su cung cap)
+            # khong co trong w(role) — KHONG duoc am tham gan trong so ngam
+            # (#7), nhung cung KHONG duoc de mot vai tro la lam mat ca tin:
+            # suy giam co kiem soat, S-GPR/Ladder bo qua, gamma/VN note van phat.
+            measurement_card_error = (
+                f"Vai trò phát ngôn không nhận diện được trong bảng trọng số "
+                f"w(role): {e} — bỏ qua S-GPR/Ladder cho tin này.")
         except (GuardViolation, ClaimCeilingViolation) as e:
             # `rationale` cua LLM co the chua so khong khop payload (vd "25%")
             # — Guard P1 CHAN dung theo thiet ke, khong phai loi. Suy giam co
@@ -268,7 +340,9 @@ def process_news_item(
         gamma_channel=gamma_channel, transmission_channel=transmission_channel,
         s_gpr_now=s_gpr_now, s_gpr_prev=s_gpr_prev, s_gpr_pctile=s_gpr_pctile,
         ladder_state=ladder_state, ladder_prev_state=ladder_prev_state,
-        days_in_state=days_in_state, jump=jump_val, jump_pctile=jump_pctile,
+        days_in_state=days_in_state, ladder_computed=ladder_computed,
+        jump=jump_val, jump_pctile=jump_pctile,
+        chain_a_last_available=chain_a_last_available, chain_a_stale=chain_a_stale,
         measurement_card=measurement_card, measurement_card_error=measurement_card_error,
         macro_brief=macro_brief, vn_note=vn_note_text, gamma_data_version=gamma_file,
         generated_at=generated_at)
@@ -282,6 +356,7 @@ def process_news_item_live(
     encoder: EncoderFn | None = None,
     gamma_reports_dir: str = "docs/reports",
     ladder_config_path: str = str(DEFAULT_LADDER_CONFIG),
+    chain_a_stale_after_days: int = DEFAULT_CHAIN_A_STALE_AFTER_DAYS,
 ) -> NewsAssessment | ExcludedResult:
     """Wrapper production: noi Postgres + file gamma that vao `process_news_item`.
 
@@ -297,7 +372,7 @@ def process_news_item_live(
     ladder_cfg = load_ladder_config(ladder_config_path)
 
     def history_provider(pair: str) -> pd.DataFrame:
-        return store.load_pair_history(engine, pair, before=stmt.published_at)
+        return store.load_pair_history(engine, pair, before=_as_utc(stmt.published_at))
 
     def jump_series_provider(as_of: pd.Timestamp) -> pd.Series:
         return store.load_jump_series(engine, as_of)
@@ -308,15 +383,19 @@ def process_news_item_live(
 
     result = process_news_item(
         stmt, llm, config, history_provider, jump_series_provider, gamma_loader,
-        encoder=encoder, ladder_config=ladder_cfg)
+        encoder=encoder, ladder_config=ladder_cfg,
+        chain_a_stale_after_days=chain_a_stale_after_days)
 
     statement_id = store.insert_statement(engine, stmt)
     if isinstance(result, ExcludedResult):
         return result
     store.insert_statement_score(engine, statement_id, result.score)
-    if result.pair_identified:
+    # CHI ghi khi ladder THAT SU tinh duoc (xem NewsAssessment.ladder_computed).
+    # Ghi vo dieu kien tren pair_identified se ghi de mot trang thai DUNG cua
+    # ngay hom do bang 0/S0 GIA khi lan xu ly nay hong (vd role la — #7).
+    if result.pair_identified and result.ladder_computed:
         pair = pair_key(result.score["actor_country"], result.score["target_country"])
-        store.upsert_ladder_state(engine, pair, stmt.published_at.normalize().date(),
+        store.upsert_ladder_state(engine, pair, _as_utc(stmt.published_at).normalize().date(),
                                   result.ladder_state, result.days_in_state,
                                   ladder_cfg.version)
     store.insert_news_assessment(engine, statement_id, result)
