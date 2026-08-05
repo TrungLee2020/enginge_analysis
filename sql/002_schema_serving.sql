@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS news_assessment (
     s_gpr_prev             REAL,
     s_gpr_pctile           REAL,
     ladder_state           SMALLINT,
+    chain_a_last_available DATE,            -- ngay moi nhat co du lieu GPRD tinh den luc xu ly tin
+    chain_a_stale          BOOLEAN,         -- True: JUMP/Ladder S4 co the im lang vi THIEU du lieu
     measurement_card       TEXT            NOT NULL,
     macro_brief            TEXT            NOT NULL,
     vn_note                TEXT            NOT NULL,

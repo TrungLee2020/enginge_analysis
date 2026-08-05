@@ -152,12 +152,12 @@ def insert_news_assessment(engine: "Engine", statement_id: int,
     sql = text("""
         INSERT INTO news_assessment (
             statement_id, gamma_channel_used, transmission_channel, s_gpr_now,
-            s_gpr_prev, s_gpr_pctile, ladder_state, measurement_card, macro_brief,
-            vn_note, gamma_data_version)
+            s_gpr_prev, s_gpr_pctile, ladder_state, chain_a_last_available,
+            chain_a_stale, measurement_card, macro_brief, vn_note, gamma_data_version)
         VALUES (
             :statement_id, :gamma_channel_used, :transmission_channel, :s_gpr_now,
-            :s_gpr_prev, :s_gpr_pctile, :ladder_state, :measurement_card, :macro_brief,
-            :vn_note, :gamma_data_version)
+            :s_gpr_prev, :s_gpr_pctile, :ladder_state, :chain_a_last_available,
+            :chain_a_stale, :measurement_card, :macro_brief, :vn_note, :gamma_data_version)
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
@@ -166,6 +166,9 @@ def insert_news_assessment(engine: "Engine", statement_id: int,
             "transmission_channel": result.transmission_channel,
             "s_gpr_now": result.s_gpr_now, "s_gpr_prev": result.s_gpr_prev,
             "s_gpr_pctile": result.s_gpr_pctile, "ladder_state": result.ladder_state,
+            "chain_a_last_available": (result.chain_a_last_available.date()
+                                       if result.chain_a_last_available is not None else None),
+            "chain_a_stale": result.chain_a_stale,
             "measurement_card": result.measurement_card or "",
             "macro_brief": result.macro_brief, "vn_note": result.vn_note,
             "gamma_data_version": result.gamma_data_version,

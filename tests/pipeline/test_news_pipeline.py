@@ -127,3 +127,46 @@ def test_as_dict_is_json_ready_flat_mapping():
     d = result.as_dict()
     assert d["v"] == 0.85 and d["actor_country"] == "USA"
     json.dumps(d)  # phai serialize duoc thang, khong con Timestamp/dataclass song
+
+
+# ---------------------------------------------------------------------------
+# Hai suy giam co kiem soat (vá theo review): chain-A cũ, speaker_role lạ
+# ---------------------------------------------------------------------------
+def test_chain_a_stale_when_jump_series_does_not_reach_as_of():
+    """GPRD chưa refresh tới ngày của tin -> chain_a_stale=True, JUMP=0 KHÔNG
+    được đọc là 'yên ắng' một cách âm thầm — có cờ + caveat trong macro_brief."""
+    stale_jump = _jump_series(as_of="2026-06-01", n_days=64)  # dừng ở 06-01
+
+    def jump_series_provider(as_of):
+        return stale_jump
+
+    result = process_news_item(
+        _stmt(published_at="2026-08-03 14:07"), _llm_json(), CONFIG,
+        lambda pair: EMPTY_HISTORY, jump_series_provider, _gamma_loader())
+    assert result.chain_a_stale is True
+    assert result.chain_a_last_available == pd.Timestamp("2026-06-01", tz="UTC")
+    assert result.jump == 0.0  # dung nhung khong the doc la "khong co JUMP that"
+    assert "chain a" in result.macro_brief.lower() or "chain A" in result.macro_brief
+    assert "thiếu dữ liệu" in result.macro_brief.lower()
+
+
+def test_chain_a_not_stale_when_jump_series_covers_as_of():
+    result = process_news_item(
+        _stmt(), _llm_json(), CONFIG, lambda pair: EMPTY_HISTORY, _jump_series,
+        _gamma_loader())
+    assert result.chain_a_stale is False
+
+
+def test_unknown_speaker_role_degrades_instead_of_crashing():
+    """Vai trò không có trong w(role) -> trước đây KeyError bay lên tận
+    run_consumer_loop và tin biến mất; giờ suy giảm có kiểm soát, macro/VN vẫn
+    phát, measurement_card=None kèm lý do rõ ràng."""
+    result = process_news_item(
+        _stmt(speaker_role="unknown_role_xyz"), _llm_json(), CONFIG,
+        lambda pair: EMPTY_HISTORY, _jump_series, _gamma_loader())
+    assert isinstance(result, NewsAssessment)
+    assert result.measurement_card is None
+    assert result.measurement_card_error is not None
+    assert "vai trò" in result.measurement_card_error.lower()
+    assert result.macro_brief and result.vn_note  # phan khac van phat binh thuong
+    assert result.s_gpr_now == 0.0 and result.ladder_state == 0  # khong tinh duoc, khong bia
