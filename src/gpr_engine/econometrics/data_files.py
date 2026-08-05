@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..ingest.ai_gpr import AI_GPR_COLUMNS
 from ..ingest.gpr_daily import PUBLISH_LAG_DAYS as GPR_DAILY_PUBLISH_LAG_DAYS
 from ..ingest.gpr_daily import SERIES as GPR_DAILY_SERIES
 from ..ingest.market_data import FRED_MAP
@@ -489,22 +490,13 @@ FRED_FREIGHT = "PCU483111483111"
 DEFAULT_AI_GPR_MONTHLY = "data/ai_gpr_data_monthly.csv"
 DEFAULT_AI_GPR_DAILY = "data/ai_gpr_data_daily.csv"
 
-AI_GPR_COLUMNS = {          # ten that trong file -> ten dung trong repo (CA daily lan monthly)
-    "GPR_AI": "AIGPR",
-    "GPR_AER": "AIGPR_AER",              # nghia chua xac minh — xem canh bao tren
-    "GPR_OIL": "AIGPR_OIL",
-    "GPR_NONOIL": "AIGPR_NONOIL",
-    "THREATS_GPR_AI": "AIGPR_THREAT",
-    "ACTS_GPR_AI": "AIGPR_ACT",
-    "GPR_OIL_MiddleEast": "AIGPR_OIL_MIDDLEEAST",
-    "GPR_OIL_Russia": "AIGPR_OIL_RUSSIA",
-    "GPR_OIL_USA": "AIGPR_OIL_USA",
-    "GPR_OIL_Venezuela": "AIGPR_OIL_VENEZUELA",
-    "GPR_OIL_Africa": "AIGPR_OIL_AFRICA",
-    "GPR_OIL_Americas": "AIGPR_OIL_AMERICAS",
-    "GPR_OIL_Asia": "AIGPR_OIL_ASIA",
-    "GPR_OIL_NorthSea": "AIGPR_OIL_NORTHSEA",
-}
+# AI_GPR_COLUMNS (ten that trong file -> ten dung trong repo, CA daily lan
+# monthly) chuyen ve `ingest/ai_gpr.py` lam nguon CHINH THUC (2026-08-05, cung
+# lan them ingest script Postgres) — import lai o day, GIONG HET pattern
+# GPR_DAILY_SERIES/PUBLISH_LAG_DAYS cua ingest/gpr_daily.py. Ly do: ingest la
+# duong PRODUCTION ghi vao ext_series, phai la nguon ten series_id chuan; day
+# la duong RESEARCH offline, dung lai chu khong dinh nghia lai (tranh drift
+# hai ban ten cot). Doi ten cot phai sua o ingest/ai_gpr.py, KHONG sua o day.
 
 _AI_GPR_MISSING_MSG = (
     "Không tìm thấy {path}. AI-GPR là file TẢI TAY (docs/16 §1):\n"
