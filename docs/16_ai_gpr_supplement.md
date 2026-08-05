@@ -136,7 +136,7 @@ Spec đầy đủ: 4 regressor (threat-persistent, threat-shock, act-persistent,
 
 ## 3. VIỆT NAM MỞ KHÓA SỚM — RÚT NGẮN LỚN NHẤT
 
-Chỉ số quốc gia gán ba vai: `initiator` · `respondent` · `spillover`. **VN gần như luôn là spillover** — chịu sốc năng lượng, gián đoạn thương mại, không phải bên khởi phát.
+Chỉ số quốc gia gán ba vai: `initiator` · `respondent` · `spillover`. **VN gần như luôn là spillover** — chịu sốc năng lượng, gián đoạn thương mại, không phải bên khởi phát. **⚠️ Câu này chỉ đúng cho 2015–2026 — xem đính chính + số liệu toàn mẫu 1960–2026 ở §3.1 trước khi dùng câu này để justify bất kỳ giả định kiến trúc nào.**
 
 **⛔ ĐÍNH CHÍNH v1.2 (2026-08-05) — toàn bộ tiền đề của mục này SAI.** Bản v1.1 viết "Country index là **daily**" và dùng đúng câu đó để kết luận "gỡ ràng buộc #10". Đối chiếu với trang download thật (không phải suy luận): file là **`ai_gpr_country_monthly.csv`** — monthly, không phải daily. Tên file tự nói lên granularity, không cần tải mới biết. Hệ quả:
 
