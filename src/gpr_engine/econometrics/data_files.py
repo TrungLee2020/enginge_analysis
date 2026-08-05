@@ -460,15 +460,50 @@ FRED_FREIGHT = "PCU483111483111"
 # bằng hash file là cách duy nhất giữ được tái lập, giống `wui_global.csv` và
 # `gold_events.csv`. Fetch ngầm mỗi lần chạy = số trong report cũ âm thầm hết đúng.
 #
-# ⚠️ SCHEMA DƯỚI ĐÂY CHƯA ĐƯỢC XÁC MINH trên file thật (2026-08-03: chưa ai tải).
-# Tên cột lấy theo mô tả docs/16 §1. Lần tải đầu PHẢI đối chiếu bằng
-# `describe_ai_gpr_file()` rồi sửa mapping ở đây — KHÔNG đoán rồi để im.
-DEFAULT_AI_GPR_DAILY = "data/ai_gpr_daily.csv"
+# ✅ SCHEMA ĐÃ XÁC MINH tren file that (2026-08-05, tai tu
+# matteoiacoviello.com/ai_gpr_files/ai_gpr_data_daily.csv, vintage
+# 13b8e8b48d41, 1960-01-01 .. 2026-07-31, 24319 hang). Ten file THAT khac ten
+# gia dinh cu (`ai_gpr_daily.csv` -> `ai_gpr_data_daily.csv`), cot ngay la
+# `Date` (hoa D) khong phai `date`, va BA cot AIGPR/AIGPRT/AIGPRA gia dinh
+# truoc day SAI HOAN TOAN ten that (GPR_AI/THREATS_GPR_AI/ACTS_GPR_AI).
+#
+# ⚠️ Phat hien quan trong so voi docs/16: ban DAILY DA CO san 8 cot GPR_OIL
+# theo VUNG (MiddleEast/Russia/USA/Venezuela/Africa/Americas/Asia/NorthSea) —
+# docs/16 §1 doc mo ta trang web thi tuong day chi co o ban THANG, sai. Kiem
+# tren du lieu that quan trong hon doc mo ta trang.
+#
+# ⚠️ Con lai CHUA xac minh (can AI_GPR_PAPER.pdf, KHONG doan):
+#   - `GPR_AER` — nghia cot chua ro (co the lien quan American Economic
+#     Review, noi paper GPR goc dang — nhung day la DOAN, khong dua vao).
+#   - 8 cot GPR_OIL_<vung> KHONG cong don ve dung GPR_OIL (da kiem tay tren
+#     nhieu hang — vd hang 2026-07-31: tong 8 vung = 908.44 nhung
+#     GPR_OIL=628.92) — co the trung lap vung hoac GPR_OIL tinh rieng, chua
+#     ro co che, dung suy dien tong hop khi chua doc paper.
+# ✅ Ban MONTHLY xac minh 2026-08-05, tai tu
+# matteoiacoviello.com/ai_gpr_files/ai_gpr_data_monthly.csv, vintage
+# 92b9ba3bd38f, 1960-01-01 .. 2026-07-01, 799 hang. CUNG SCHEMA voi ban daily
+# (cung 15 cot, chi khac tan suat) — dung chung AI_GPR_COLUMNS, load qua
+# `load_ai_gpr_monthly()`. Day KHONG PHAI file "Country Decompositions" (
+# ai_gpr_country_monthly.csv / ai_gpr_bilateral_monthly.csv /
+# ai_gpr_country_eventtype_monthly.csv) — 3 file do CHUA tai, CHUA co loader.
+DEFAULT_AI_GPR_MONTHLY = "data/ai_gpr_data_monthly.csv"
+DEFAULT_AI_GPR_DAILY = "data/ai_gpr_data_daily.csv"
 
-AI_GPR_COLUMNS = {          # tên trong file (giả định) -> tên dùng trong repo
-    "AIGPR": "AIGPR",
-    "AIGPRT": "AIGPR_THREAT",
-    "AIGPRA": "AIGPR_ACT",
+AI_GPR_COLUMNS = {          # ten that trong file -> ten dung trong repo (CA daily lan monthly)
+    "GPR_AI": "AIGPR",
+    "GPR_AER": "AIGPR_AER",              # nghia chua xac minh — xem canh bao tren
+    "GPR_OIL": "AIGPR_OIL",
+    "GPR_NONOIL": "AIGPR_NONOIL",
+    "THREATS_GPR_AI": "AIGPR_THREAT",
+    "ACTS_GPR_AI": "AIGPR_ACT",
+    "GPR_OIL_MiddleEast": "AIGPR_OIL_MIDDLEEAST",
+    "GPR_OIL_Russia": "AIGPR_OIL_RUSSIA",
+    "GPR_OIL_USA": "AIGPR_OIL_USA",
+    "GPR_OIL_Venezuela": "AIGPR_OIL_VENEZUELA",
+    "GPR_OIL_Africa": "AIGPR_OIL_AFRICA",
+    "GPR_OIL_Americas": "AIGPR_OIL_AMERICAS",
+    "GPR_OIL_Asia": "AIGPR_OIL_ASIA",
+    "GPR_OIL_NorthSea": "AIGPR_OIL_NORTHSEA",
 }
 
 _AI_GPR_MISSING_MSG = (
@@ -516,26 +551,15 @@ def ai_gpr_vintage(path: str = DEFAULT_AI_GPR_DAILY) -> str | None:
     return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
 
 
-def load_ai_gpr_daily(
-    path: str = DEFAULT_AI_GPR_DAILY,
-    date_col: str = "date",
-    columns: Mapping[str, str] | None = None,
+def _load_ai_gpr(
+    path: str,
+    date_col: str,
+    columns: Mapping[str, str] | None,
+    index_name: str,
 ) -> pd.DataFrame:
-    """AI-GPR daily THÔ (headline + threats/acts) -> wide, index=ngày.
-
-    Thay thế vai trò của `load_gpr_daily` cho các run trên AI-GPR (docs/16 §1).
-    GPRD gốc **giữ nguyên làm đối chứng** — E0 đã PASS trên nó và tương quan hai
-    chỉ số chỉ 0.69, đủ khác để so sánh có nghĩa.
-
-    ⚠️ Trước khi dùng lần đầu: chạy `describe_ai_gpr_file()` và đối chiếu tên cột.
-    Hàm này raise nếu cột khai trong `columns` không có trong file — KHÔNG lặng
-    lẽ bỏ qua cột thiếu, vì thiếu threats/acts thì mọi phân tách ACT/THREAT sau
-    đó âm thầm chạy trên dữ liệu rỗng.
-
-    ⚠️ AI-GPR KHÔNG cùng hình dạng với GPRD (docs/16 §5): mượt hơn, dai hơn
-    (tự tương quan 90 ngày 0.73 vs 0.62), đuôi phải mỏng hơn, không có ngày nào
-    bằng 0. Ngưỡng JUMP q95/q99 rolling **phải hiệu chuẩn lại** — không bê thẳng
-    tham số đã dùng cho GPRD sang.
+    """Loi chung cho ban daily va monthly — CUNG mot schema (AI_GPR_COLUMNS),
+    chi khac tan suat/path. Khong xuat cong khai — dung qua
+    `load_ai_gpr_daily`/`load_ai_gpr_monthly`.
     """
     p = Path(path)
     if not p.exists():
@@ -555,10 +579,324 @@ def load_ai_gpr_daily(
     out = df[[date_col, *mapping]].rename(columns=mapping)
     out[date_col] = pd.to_datetime(out[date_col])
     out = out.set_index(date_col).sort_index()
-    out.index.name = "date"
+    out.index.name = index_name
     out.attrs["vintage"] = ai_gpr_vintage(path)
     out.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
     return out
+
+
+def load_ai_gpr_daily(
+    path: str = DEFAULT_AI_GPR_DAILY,
+    date_col: str = "Date",
+    columns: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """AI-GPR daily THÔ -> wide, index=ngày.
+
+    File that (xac minh 2026-08-05) KHONG chi co headline+threats/acts nhu
+    docs/16 §1 mo ta ban dau — con co GPR_AER, GPR_OIL/GPR_NONOIL, VA 8 cot
+    GPR_OIL theo VUNG (energy channel routing co san o muc DAILY, khong phai
+    chi THANG nhu doc mo ta trang web). Xem canh bao ben canh AI_GPR_COLUMNS.
+
+    Thay thế vai trò của `load_gpr_daily` cho các run trên AI-GPR (docs/16 §1).
+    GPRD gốc **giữ nguyên làm đối chứng** — E0 đã PASS trên nó và tương quan hai
+    chỉ số chỉ 0.69, đủ khác để so sánh có nghĩa.
+
+    ⚠️ Trước khi dùng lần đầu: chạy `describe_ai_gpr_file()` và đối chiếu tên cột.
+    Hàm này raise nếu cột khai trong `columns` không có trong file — KHÔNG lặng
+    lẽ bỏ qua cột thiếu, vì thiếu threats/acts thì mọi phân tách ACT/THREAT sau
+    đó âm thầm chạy trên dữ liệu rỗng.
+
+    ⚠️ AI-GPR KHÔNG cùng hình dạng với GPRD (docs/16 §5): mượt hơn, dai hơn
+    (tự tương quan 90 ngày 0.73 vs 0.62), đuôi phải mỏng hơn, không có ngày nào
+    bằng 0. Ngưỡng JUMP q95/q99 rolling **phải hiệu chuẩn lại** — không bê thẳng
+    tham số đã dùng cho GPRD sang.
+    """
+    return _load_ai_gpr(path, date_col, columns, index_name="date")
+
+
+def load_ai_gpr_monthly(
+    path: str = DEFAULT_AI_GPR_MONTHLY,
+    date_col: str = "Date",
+    columns: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """AI-GPR monthly THÔ -> wide, index=đầu tháng. CÙNG schema với bản daily
+    (xác minh 2026-08-05, vintage `92b9ba3bd38f`) — chỉ khác tần suất, tái
+    dùng `AI_GPR_COLUMNS`.
+
+    ⚠️ KHÔNG PHẢI file "Country Decompositions" (`load_ai_gpr_eventtype_monthly`,
+    `load_ai_gpr_country_eventtype_monthly`, `load_ai_gpr_bilateral_monthly`
+    bên dưới) — đó là dữ liệu KHÁC (theo loại sự kiện/nước/cặp nước). File
+    này chỉ là bản monthly của đúng chỉ số tổng hợp mà `load_ai_gpr_daily()`
+    đọc ở mức ngày.
+
+    Ghép vào `build_monthly_panel` theo đúng quy ước information-time
+    (`align_monthly_gpr_to_information_time`) như GPR gốc — tháng M chỉ dùng
+    được ở bucket M+1, KHÔNG join thẳng vào outcome cùng tháng (#9, #11).
+    """
+    return _load_ai_gpr(path, date_col, columns, index_name="month")
+
+
+# ---------------------------------------------------------------------------
+# AI-GPR "Country Decompositions" — docs/16 §1 v1.2/v1.3. BA file KHÁC chỉ số
+# tổng hợp ở trên (theo loại sự kiện / nước+loại sự kiện / cặp nước có hướng).
+# XÁC MINH 2026-08-05 trên file thật, tải tay (cùng nguyên tắc §1 phía trên).
+# ⚠️ CHƯA có `ai_gpr_country_monthly.csv` (200 nước × 4 vai) — file thứ 4
+# docs/16 §1 liệt kê, chưa tải, chưa xác minh, không có loader ở đây.
+# ---------------------------------------------------------------------------
+DEFAULT_AI_GPR_EVENTTYPE_MONTHLY = "data/ai_gpr_eventtype_monthly.csv"
+DEFAULT_AI_GPR_COUNTRY_EVENTTYPE_MONTHLY = "data/ai_gpr_country_eventtype_monthly.csv"
+DEFAULT_AI_GPR_BILATERAL_MONTHLY = "data/ai_gpr_bilateral_monthly.csv"
+
+# 8 loại sự kiện (xác minh trên `ai_gpr_eventtype_monthly.csv`, vintage
+# 2026-08-05) — CỘNG DỒN ĐÚNG về GPR_AI (kiểm tay: corr=0.9999999999976,
+# lệch tuyệt đối tối đa 0.0002 trên toàn mẫu 799 hàng) — KHÁC hẳn 8 cột
+# GPR_OIL_<vùng> ở `load_ai_gpr_daily/monthly` (KHÔNG cộng dồn về GPR_OIL —
+# CƠ CHẾ ĐÃ XÁC MINH qua AI_GPR_PAPER.pdf, đọc 2026-08-05: prompt phân loại
+# vùng cho phép chọn "one or more" vùng cho MỘT bài báo — bài nói về xung đột
+# ảnh hưởng cả Middle East lẫn Russia được cộng vào CẢ HAI tổng vùng nhưng chỉ
+# tính MỘT LẦN vào tổng GPR_OIL, nên tổng-các-vùng > GPR_OIL là kỳ vọng đúng,
+# không phải lỗi dữ liệu. Paper cũng xác nhận: prompt định nghĩa **13** vùng
+# gốc (Middle East/Russia/USA/Venezuela/North Africa/West Africa/Central Asia/
+# North Sea/Canada/Mexico/Latin America/Southeast Asia/China) — khớp đúng
+# "13 vùng" mà docs/16 v1.0 từng ghi; 8 cột trong file CSV công khai là bản
+# GOM NHÓM (Africa=North+West Africa, Americas=Canada+Mexico+Latin America,
+# Asia=Central Asia+Southeast Asia+China, 5 vùng còn lại giữ nguyên — khớp số
+# 5+2+3+3=13 — suy luận từ tên cột, chưa thấy paper nói thẳng cách gộp).
+#
+# Taxonomy LOẠI SỰ KIỆN (military_conflict/diplomatic_tension/terrorism/
+# civil_war/nuclear_threat/coup/sanctions/other) — paper định nghĩa nguyên
+# văn (Appendix A.6, prompt phân loại sự kiện): mô tả BẢN CHẤT hành động địa
+# chính trị, KHÔNG PHẢI 4 kênh truyền dẫn energy/trade/financial/military mà
+# `gamma_lookup.py`/`vn_exposure.py` cần — hai trục này TRỰC GIAO theo đúng
+# thiết kế của paper: định nghĩa "spillover" của paper liệt kê energy
+# shock/trade disruption như VÍ DỤ CƠ CHẾ lan tỏa, không phải một loại sự
+# kiện. Vì vậy KHÔNG có cách nào map 1-1 sạch — xem `EVENT_TYPE_TO_CHANNEL`
+# (đề xuất, CHƯA dùng trong production) ngay dưới đây.
+AI_GPR_EVENT_TYPES = (
+    "military_conflict", "diplomatic_tension", "terrorism", "civil_war",
+    "nuclear_threat", "coup", "sanctions", "other",
+)
+
+# ĐỀ XUẤT map 8 loại sự kiện -> 4 kênh truyền dẫn — CHƯA DÙNG Ở BẤT KỲ ĐƯỜNG
+# PRODUCTION NÀO (gamma_lookup.py vẫn chỉ dùng pooled/act/threat như cũ). Đây
+# là quyết định thiết kế cần XÁC NHẬN trước khi dùng, không phải sự thật đã
+# kiểm định — cùng tinh thần `CHANNEL_TO_TRANSMISSION` trong statement_scorer.py
+# (chỉ điền cặp hiển nhiên, còn lại None).
+#
+# Lý do từng dòng:
+#   military_conflict, civil_war, coup, nuclear_threat -> military: cả bốn
+#     đều là hành động/đe dọa VŨ TRANG trực tiếp — khớp định nghĩa "military"
+#     trong transmission-formulas.md §2 (xung đột vũ trang, triển khai quân).
+#   sanctions -> financial: khớp định nghĩa "financial" trong
+#     transmission-formulas.md §2 (trừng phạt tài chính, đóng băng tài sản) —
+#     ĐÃ có tiền lệ y hệt trong statement_scorer.CHANNEL_TO_TRANSMISSION
+#     (dù ở đó "sanction" từ chân B vẫn để None chờ chốt — ở đây chốt được vì
+#     ngữ cảnh khác: đây là loại sự kiện độc lập, không phải nhãn LLM chấm tin).
+#   terrorism, diplomatic_tension, other -> None: KHÔNG map. Terrorism có thể
+#     đánh vào hạ tầng năng lượng (energy) hoặc gây risk-off chung (financial)
+#     tùy mục tiêu — một nhãn không đủ phân biệt. Diplomatic tension là tiền
+#     thân của MỌI kênh, không riêng kênh nào. "other" là catch-all, theo
+#     định nghĩa không map được.
+#
+# ⚠️ QUAN TRỌNG NHẤT: taxonomy 8 loại KHÔNG có category "energy" hay "trade"
+# — đây không phải khoảng trống ngẫu nhiên mà là hệ quả thiết kế (xem cảnh báo
+# trên AI_GPR_EVENT_TYPES). Hai kênh đó PHẢI lấy từ nguồn khác, đã có sẵn
+# trong repo, KHÔNG suy ra từ 8 loại sự kiện:
+#   - energy: dùng trực tiếp `AIGPR_OIL`/`AIGPR_OIL_<vùng>` từ
+#     `load_ai_gpr_daily/monthly()` — dữ liệu CHUYÊN BIỆT cho oil/energy,
+#     không phải suy diễn từ event-type.
+#   - trade: dùng `load_ai_gpr_bilateral_monthly()` — paper (Section 5.3,
+#     6.x) VALIDATE trực tiếp chỉ số này bằng gravity equation, thấy GPR song
+#     phương cao hơn đi cùng THƯƠNG MẠI song phương thấp hơn — đây là bằng
+#     chứng thật cho việc bilateral index đo đúng kênh trade, không phải
+#     suy diễn.
+EVENT_TYPE_TO_CHANNEL: dict[str, str | None] = {
+    "military_conflict": "military",
+    "civil_war": "military",
+    "coup": "military",
+    "nuclear_threat": "military",
+    "sanctions": "financial",
+    "terrorism": None,
+    "diplomatic_tension": None,
+    "other": None,
+}
+
+
+def load_ai_gpr_eventtype_monthly(
+    path: str = DEFAULT_AI_GPR_EVENTTYPE_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR toàn cầu theo 8 LOẠI SỰ KIỆN (không tách nước) -> wide, index=tháng.
+
+    Xác minh 2026-08-05 trên file thật (1960-01-01..2026-07-01, 799 hàng).
+    Cột: `AIGPR` (đối chiếu tổng) + 8 cột trong `AI_GPR_EVENT_TYPES`.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    need = [date_col, "GPR_AI", *AI_GPR_EVENT_TYPES]
+    missing = [c for c in need if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{path} thiếu cột {missing}. Cột thực tế: {list(df.columns)}. "
+            "Chạy describe_ai_gpr_file() rồi đối chiếu AI_GPR_EVENT_TYPES.")
+    out = df[need].rename(columns={date_col: "month", "GPR_AI": "AIGPR"})
+    out["month"] = pd.to_datetime(out["month"])
+    out = out.set_index("month").sort_index()
+    out.attrs["vintage"] = ai_gpr_vintage(path)
+    out.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return out
+
+
+def load_ai_gpr_country_eventtype_monthly(
+    path: str = DEFAULT_AI_GPR_COUNTRY_EVENTTYPE_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR theo NƯỚC × LOẠI SỰ KIỆN THÔ -> wide, index=tháng.
+
+    Xác minh 2026-08-05 (1960-01-01..2026-07-01, 799 hàng, 1602 cột =
+    Date + GPR_AI + 200 nước × 8 loại sự kiện, tên cột `{Nước}_{loại}` —
+    vd `Vietnam_military_conflict`; nước viết đầy đủ, có dấu cách với nước
+    ghép ("Saudi Arabia")). KHÔNG rename/tách hết 1600 cột ở đây (nặng
+    không cần thiết) — dùng `select_country_eventtype()` để lấy một nước.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế đầu "
+            f"tiên: {list(df.columns)[:5]}...")
+    df = df.rename(columns={date_col: "month"})
+    df["month"] = pd.to_datetime(df["month"])
+    df = df.set_index("month").sort_index()
+    df.attrs["vintage"] = ai_gpr_vintage(path)
+    df.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return df
+
+
+def select_country_eventtype(df: pd.DataFrame, country: str) -> pd.DataFrame:
+    """Trích 8 cột loại sự kiện của MỘT nước từ
+    `load_ai_gpr_country_eventtype_monthly()`, bỏ tiền tố tên nước.
+
+    Raise nếu nước không có trong file (KHÔNG trả DataFrame rỗng) — tên nước
+    sai chính tả mà lặng lẽ trả rỗng thì phân tích sau đó âm thầm chạy trên
+    dữ liệu trống.
+    """
+    cols = {f"{country}_{et}": et for et in AI_GPR_EVENT_TYPES}
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"Không tìm thấy nước {country!r} (thiếu cột {missing}). Kiểm tra "
+            "đúng chính tả/định dạng tên nước trong file gốc (vd 'Vietnam', "
+            "'Saudi Arabia', 'South Korea').")
+    return df[list(cols)].rename(columns=cols)
+
+
+def load_ai_gpr_bilateral_monthly(
+    path: str = DEFAULT_AI_GPR_BILATERAL_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR song phương CÓ HƯỚNG THÔ -> wide, index=tháng.
+
+    Xác minh 2026-08-05 (1960-01-01..2026-07-01, 799 hàng, 1202 cột =
+    Date + GPR_AI + 1.200 cặp nước, tên cột `{Actor}|{Target}` — CÓ HƯỚNG,
+    vd cả `USA|Vietnam` lẫn `Vietnam|USA` đều tồn tại RIÊNG. KHÔNG rename hết
+    1200 cột — dùng `select_bilateral_pair()` để lấy một cặp.
+
+    ⚠️ Dấu `|` KHÁC quy ước `pair_key()` của `indices.s_gpr` (dùng `>`) —
+    KHÔNG trộn lẫn hai định dạng; chuyển đổi tường minh ở nơi dùng nếu cần
+    khớp với chuỗi S-GPR nội bộ.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế đầu "
+            f"tiên: {list(df.columns)[:5]}...")
+    df = df.rename(columns={date_col: "month"})
+    df["month"] = pd.to_datetime(df["month"])
+    df = df.set_index("month").sort_index()
+    df.attrs["vintage"] = ai_gpr_vintage(path)
+    df.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return df
+
+
+def select_bilateral_pair(df: pd.DataFrame, actor: str, target: str) -> pd.Series:
+    """Trích MỘT cặp `actor|target` từ `load_ai_gpr_bilateral_monthly()`.
+
+    Raise nếu cặp không có trong 1.200 cặp top — im lặng trả rỗng sẽ biến
+    "không đủ dữ liệu cặp này" thành "GPR=0 suốt", hai ý nghĩa khác hẳn nhau.
+    """
+    col = f"{actor}|{target}"
+    if col not in df.columns:
+        raise KeyError(
+            f"Không tìm thấy cặp {col!r} trong 1.200 cặp top. Kiểm chính tả "
+            "tên nước, hoặc cặp này không đủ khối lượng để vào top 1.200.")
+    return df[col].rename(col)
+
+
+# File thứ 4 và cuối cùng trong danh sách "Country Decompositions" docs/16 §1 —
+# xác minh 2026-08-05. `all` = tổng, `initiator`/`respondent`/`spillover` CỘNG
+# DỒN ĐÚNG về `all` (kiểm tay trên Vietnam + USA, nhiều tháng: khớp tới 4 chữ
+# số thập phân) — cùng kiểu cộng dồn sạch với `AI_GPR_EVENT_TYPES`, khác 8 cột
+# oil-vùng không cộng dồn. Đây là file khớp THẲNG vào khung docs/16 §3
+# ("VN gần như luôn spillover") — `select_country_role(df, "Vietnam")
+# ["spillover"]` là chuỗi tháng đo đúng vai trò đó, không cần tự suy ra.
+DEFAULT_AI_GPR_COUNTRY_ROLE_MONTHLY = "data/ai_gpr_country_monthly.csv"
+AI_GPR_ROLES = ("all", "initiator", "respondent", "spillover")
+
+
+def load_ai_gpr_country_monthly(
+    path: str = DEFAULT_AI_GPR_COUNTRY_ROLE_MONTHLY,
+    date_col: str = "Date",
+) -> pd.DataFrame:
+    """GPR theo NƯỚC × VAI TRÒ THÔ -> wide, index=tháng.
+
+    Xác minh 2026-08-05 (1960-01-01..2026-07-01, 799 hàng, 802 cột =
+    Date + GPR_AI + 200 nước × 4 vai, tên cột `{Nước}_{vai}` — vd
+    `Vietnam_spillover`). KHÔNG rename hết 800 cột — dùng
+    `select_country_role()` để lấy một nước.
+
+    ⚠️ ĐỪNG nhầm với `load_ai_gpr_country_eventtype_monthly()` — cùng 200
+    nước nhưng tách theo VAI TRÒ (all/initiator/respondent/spillover) ở đây,
+    theo LOẠI SỰ KIỆN (8 category) ở kia — hai trục khác nhau, hai file khác
+    nhau.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
+    df = pd.read_csv(p)
+    if date_col not in df.columns:
+        raise ValueError(
+            f"Không có cột ngày {date_col!r} trong {path}. Cột thực tế đầu "
+            f"tiên: {list(df.columns)[:5]}...")
+    df = df.rename(columns={date_col: "month"})
+    df["month"] = pd.to_datetime(df["month"])
+    df = df.set_index("month").sort_index()
+    df.attrs["vintage"] = ai_gpr_vintage(path)
+    df.attrs["source"] = "AI-GPR (Iacoviello & Tong 2026), docs/16 §1"
+    return df
+
+
+def select_country_role(df: pd.DataFrame, country: str) -> pd.DataFrame:
+    """Trích 4 cột vai trò (`AI_GPR_ROLES`) của MỘT nước từ
+    `load_ai_gpr_country_monthly()`, bỏ tiền tố tên nước.
+
+    Raise nếu nước không có trong file — cùng lý do với
+    `select_country_eventtype`/`select_bilateral_pair`: không lặng lẽ trả rỗng.
+    """
+    cols = {f"{country}_{role}": role for role in AI_GPR_ROLES}
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"Không tìm thấy nước {country!r} (thiếu cột {missing}). Kiểm tra "
+            "đúng chính tả/định dạng tên nước trong file gốc.")
+    return df[list(cols)].rename(columns=cols)
 
 
 def transform_freight(raw: pd.Series) -> pd.Series:

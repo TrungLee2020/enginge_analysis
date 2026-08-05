@@ -41,7 +41,39 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-04)
+## Trạng thái hiện tại (cập nhật 2026-08-05, vòng 2)
+
+### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh
+
+Ba việc user yêu cầu làm liền ("làm từ 1 đến 3 luôn"), tất cả dựa trên dữ liệu/paper thật, không đoán — xem `docs/16` v1.6 để đọc đầy đủ:
+
+- **Task 3 (đọc `AI_GPR_PAPER.pdf`) giải quyết dứt điểm 2 câu hỏi mở của docs/16:** `GPR_AER` = chỉ số GPR keyword-based GỐC của chính Caldara-Iacoviello (2022), tính lại trên đúng 3 tờ báo mà AI-GPR dùng (để so sánh công bằng) — không phải GPRD gốc đầy đủ. Tương quan AI-GPR vs bản này = 0.69 theo paper, khớp 0.70 đo trên file thật. Cơ chế 8 vùng oil không cộng dồn về `GPR_OIL`: prompt phân loại vùng cho phép chọn "one or more" vùng/bài báo — thiết kế đúng, không phải lỗi. Bảng cũ "13 vùng" của v1.0 **đúng** theo paper (v1.1/v1.3 kết luận sai là "13 vùng chưa từng xác minh") — 8 cột CSV công khai là bản gộp nhóm từ 13 vùng gốc (Africa=North+West Africa, Americas=Canada+Mexico+Latin America, Asia=Central Asia+Southeast Asia+China).
+- **Task 2 (phân tích toàn mẫu vai trò VN, 1960-2026, 799 tháng, thay quan sát vài dòng trước đó):** câu "VN gần như luôn spillover" của docs/16 §3 **chỉ đúng cho giai đoạn 2015-2026** (spillover 67.4% biên độ, 64.7% số tháng) — **sai như phát biểu lịch sử chung**: 1960-1989 (thời chiến tranh Việt Nam) VN chủ yếu là `respondent` (57.1% biên độ, 63.3% số tháng), toàn mẫu 799 tháng respondent vẫn chiếm ưu thế (56.7% vs 17.9% spillover). Cơ chế hợp lý (VN chuyển từ "trong cuộc chiến" sang "nền kinh tế mở hứng sốc bên ngoài"), đường chuyển tiếp trơn qua 3 giai đoạn — không phải artifact chọn mốc. May mắn: giai đoạn spillover chiếm ưu thế (2015+) gần trùng Development+Validation window của dự án (2015-2023) — giả định `vn_exposure.py` hợp lý trong đúng cửa sổ dùng để ước lượng/validate, chỉ sai nếu khái quát ngược lịch sử xa. Số liệu đầy đủ ở `docs/16` §3.1 mới.
+- **Task 1 (đề xuất `EVENT_TYPE_TO_CHANNEL`, mới trong `data_files.py`, CHƯA dùng production):** 8 loại sự kiện AI-GPR **không có category tương ứng trực tiếp cho energy/trade** — `military_conflict`/`civil_war`/`coup`/`nuclear_threat`→`military`, `sanctions`→`financial`, còn `terrorism`/`diplomatic_tension`/`other`→`None` (chưa xác định, không đoán). Energy nên lấy từ `AIGPR_OIL_*` (đã có, daily), trade nên lấy từ bilateral index (đã có, monthly) — cả hai đã ingest, không cần suy ra từ event-type. Test khóa mapping không lệch khỏi `AI_GPR_EVENT_TYPES` thật + khóa phát hiện "không có energy/trade" (`tests/econ/test_ai_gpr_decompositions.py`).
+- **Việc code:** chỉ thêm hằng số + docstring lý do, KHÔNG đổi đường production nào (nguyên tắc #1 — chưa qua cổng kiểm định thì không vào service). 333 test pass.
+
+## Trạng thái trước đó (2026-08-05, vòng 1)
+
+### 🐛 6 bug thật vá trong pipeline serving (rà lại sau khi ship) + ✅ AI-GPR daily xác minh trên file thật
+
+**Rà lại `pipeline/news_pipeline.py` + `service/*.py` sau khi ship (2026-08-05), tìm và vá 6 bug thật** (không phải giả thuyết — tái hiện trước khi vá, có test khóa lại):
+- `published_at` tz-naive làm crash (Statement cho phép naive, phần còn lại pipeline là UTC tz-aware) — chuẩn hóa tại ranh giới (`_as_utc`), KHÔNG đổi hợp đồng `Statement` (phá test cũ).
+- `ext_series`/`statement_scores` cho phép nhiều `data_version`/`model_version` cùng ngày/tin — không lọc thì `JUMP`/S-GPR rolling đếm trùng. Sửa bằng `DISTINCT ON` lấy bản mới nhất.
+- `process_news_item_live` ghi đè `ladder_state` bằng 0 giả khi tính hỏng (vd role lạ) — thêm cờ `ladder_computed`, chỉ ghi DB khi tính thành công thật.
+- `speaker_role` lạ, chain-A GPRD cũ (`chain_a_stale` flag mới), Kafka publish fire-and-forget (thêm `flush()` + `on_delivery`, raise rõ khi không xác nhận được).
+- 328 test pass. Xem lịch sử commit trên branch để chi tiết từng bug.
+
+**AI-GPR — chỉ số tổng hợp daily + monthly (docs/16) — ⛔ blocker cũ đã gỡ cho phần này.** Tải cả 2 file thật (2026-08-05): daily (vintage `13b8e8b48d41`, 1960-01-01..2026-07-31) + monthly (vintage `92b9ba3bd38f`, 1960-01-01..2026-07-01) — **cùng schema hệt nhau**, chỉ khác tần suất. Lộ ra **schema giả định trước đó sai hoàn toàn** (`AIGPR`/`AIGPRT`/`AIGPRA` giả định ↔ `GPR_AI`/`THREATS_GPR_AI`/`ACTS_GPR_AI` thật, cột ngày `Date` không phải `date`) — đã sửa `AI_GPR_COLUMNS` + thêm `load_ai_gpr_monthly()` (dùng chung `_load_ai_gpr()` với bản daily) + test khớp file thật.
+
+**⚠️ docs/16 §3 tự đính chính lần 2 — tiền đề "Country index daily" SAI.** Trang download thật liệt kê `ai_gpr_country_monthly.csv`/`ai_gpr_bilateral_monthly.csv` — **monthly**, không phải daily như v1.1 khẳng định. Kết luận "gỡ ràng buộc #10 cho VN daily track" **rút lại** — #10 vẫn cấm, `vn_market_series_missing` KHÔNG phải blocker duy nhất còn lại. Điểm ĐÚNG: Oil GPR theo vùng **thật sự có ở daily** (8 vùng, không phải 13 như bảng cũ ghi — xác nhận sai trên cả 2 file).
+
+**✅ AI-GPR "Country Decompositions" — ĐỦ 4/4 file, tải + ingest xong (2026-08-05).** `ai_gpr_eventtype_monthly.csv` (global, 8 loại sự kiện — `load_ai_gpr_eventtype_monthly`), `ai_gpr_country_eventtype_monthly.csv` (200 nước × 8 loại, 1602 cột — `load_ai_gpr_country_eventtype_monthly` + `select_country_eventtype`, Vietnam xác nhận có đủ 8 cột), `ai_gpr_bilateral_monthly.csv` (1200 cặp CÓ HƯỚNG — `load_ai_gpr_bilateral_monthly` + `select_bilateral_pair`, nhiều cặp Vietnam), `ai_gpr_country_monthly.csv` (200 nước × 4 vai all/initiator/respondent/spillover — `load_ai_gpr_country_monthly` + `select_country_role`). **Xác minh quan trọng**: cả 8-loại-sự-kiện lẫn 4-vai-trò đều **cộng dồn đúng về tổng** (GPR_AI / `all`, lệch ≤0.0002) — khác hẳn 8 cột oil-vùng KHÔNG cộng dồn về GPR_OIL. **Taxonomy 8 loại sự kiện KHÔNG map sẵn sang 4 kênh truyền dẫn** (energy/trade/financial/military) — `sanctions`≈financial, `military_conflict`≈military là 2 cặp rõ, còn energy/trade không có category tương ứng trực tiếp — quyết định mapping còn mở, chưa tự bịa. **⚠️ Soi nhanh Vietnam qua `select_country_role`: KHÔNG "luôn luôn spillover"** như khung docs/16 §3 giả định — có tháng `respondent`>0 (quan sát vài dòng, chưa phải phân tích thống kê đầy đủ). Không còn file AI-GPR nào thiếu — việc còn lại là nghiên cứu (mapping kênh, phân tích vai trò VN đầy đủ), không phải tải data. 330 test pass.
+
+327 test pass (9 test mới: 2 cho `load_ai_gpr_monthly`, 7 cho 3 loader Country Decompositions).
+
+**Domain `matteoiacoviello.com` bị chặn ở egress policy của sandbox Claude Code** (xác nhận qua `curl $HTTPS_PROXY/__agentproxy/status`, không phải trang chặn bot) — file AI-GPR bắt buộc tải tay + upload vào phiên, không tự fetch được.
+
+## Trạng thái trước đó (2026-08-04)
 
 ### 🏭 Pipeline serving đầu tiên — "1 tin vào → GPR + khuyến nghị vĩ mô → VN", đẩy Kafka
 

@@ -17,12 +17,15 @@ from gpr_engine.econometrics.data_files import (
     ai_gpr_vintage,
     describe_ai_gpr_file,
     load_ai_gpr_daily,
+    load_ai_gpr_monthly,
 )
 
 
 def _write(path, cols: dict, n: int = 50) -> None:
+    # Cot ngay "Date" (hoa D) khop file that (xac minh 2026-08-05, xem
+    # data_files.py AI_GPR_COLUMNS) — khong phai "date" gia dinh cu.
     idx = pd.date_range("2020-01-01", periods=n, freq="D")
-    pd.DataFrame({"date": idx, **{c: range(n) for c in cols}}).to_csv(path, index=False)
+    pd.DataFrame({"Date": idx, **{c: range(n) for c in cols}}).to_csv(path, index=False)
 
 
 @pytest.fixture
@@ -53,7 +56,7 @@ def test_loads_and_renames(good_file):
 def test_missing_column_raises_not_silently_dropped(tmp_path):
     """Thiếu threats/acts phải NỔ — nếu bỏ qua thì tách ACT/THREAT sau đó rỗng."""
     p = tmp_path / "partial.csv"
-    _write(p, {"AIGPR": None})           # thiếu AIGPRT/AIGPRA
+    _write(p, {"GPR_AI": None})          # thiếu THREATS_GPR_AI/ACTS_GPR_AI/...
     with pytest.raises(ValueError, match="thiếu cột"):
         load_ai_gpr_daily(str(p))
 
@@ -92,3 +95,21 @@ def test_custom_columns_override(tmp_path):
     df = load_ai_gpr_daily(str(p),
                            columns={"ai_gpr": "AIGPR", "ai_gpr_threat": "AIGPR_THREAT"})
     assert list(df.columns) == ["AIGPR", "AIGPR_THREAT"]
+
+
+def test_monthly_loader_same_schema_different_index_name(tmp_path):
+    """Bản monthly (xác minh 2026-08-05, vintage 92b9ba3bd38f) CÙNG schema với
+    daily — chỉ khác index.name ('month' thay vì 'date') để phân biệt tần suất
+    khi ghép vào build_monthly_panel."""
+    p = tmp_path / "ai_gpr_data_monthly.csv"
+    _write(p, dict.fromkeys(AI_GPR_COLUMNS), n=24)
+    df = load_ai_gpr_monthly(str(p))
+    assert list(df.columns) == list(AI_GPR_COLUMNS.values())
+    assert df.index.name == "month"
+    assert df.attrs["vintage"] == ai_gpr_vintage(str(p))
+
+
+def test_monthly_missing_file_gives_actionable_instructions(tmp_path):
+    with pytest.raises(FileNotFoundError) as e:
+        load_ai_gpr_monthly(str(tmp_path / "nope.csv"))
+    assert "describe_ai_gpr_file" in str(e.value)
