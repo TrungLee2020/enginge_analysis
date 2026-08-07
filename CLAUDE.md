@@ -52,6 +52,10 @@ Ba việc user yêu cầu làm liền ("làm từ 1 đến 3 luôn"), tất cả
 - **Task 1 (đề xuất `EVENT_TYPE_TO_CHANNEL`, mới trong `data_files.py`, CHƯA dùng production):** 8 loại sự kiện AI-GPR **không có category tương ứng trực tiếp cho energy/trade** — `military_conflict`/`civil_war`/`coup`/`nuclear_threat`→`military`, `sanctions`→`financial`, còn `terrorism`/`diplomatic_tension`/`other`→`None` (chưa xác định, không đoán). Energy nên lấy từ `AIGPR_OIL_*` (đã có, daily), trade nên lấy từ bilateral index (đã có, monthly) — cả hai đã ingest, không cần suy ra từ event-type. Test khóa mapping không lệch khỏi `AI_GPR_EVENT_TYPES` thật + khóa phát hiện "không có energy/trade" (`tests/econ/test_ai_gpr_decompositions.py`).
 - **Việc code:** chỉ thêm hằng số + docstring lý do, KHÔNG đổi đường production nào (nguyên tắc #1 — chưa qua cổng kiểm định thì không vào service). 333 test pass.
 
+**Vòng 3 cùng ngày — user chọn ký `EVENT_TYPE_TO_CHANNEL`:** thêm `DEC-2026-08-05-event-type-channel` vào `config/hypothesis_registry.yaml` §`decisions:` (cùng thủ tục `DEC-2026-08-02-shock-axis`), khóa bằng `LOCKED_DECISION_IDS` + test mới `test_event_type_channel_decision_matches_code` (chặn code đổi mapping mà quên sửa chữ ký). **Phạm vi chữ ký hẹp có chủ đích:** chỉ xác nhận Ý NGHĨA của mapping (8 loại sự kiện → 4 kênh, energy/trade lấy từ nguồn khác không suy từ event-type) — KHÔNG mở khóa dùng trong `gamma_lookup.py`/`vn_exposure.py` hay bất kỳ đường production nào, việc nối dây thật vẫn là quyết định kiến trúc riêng qua nguyên tắc #1. 334 test pass.
+
+**Vòng 4 cùng ngày — user: "mục đích tới production, cập nhật đủ cho dev để test và prod".** Gỡ một khoảng trống production thật (không phải khoảng trống của yêu cầu vừa ký): AI-GPR có loader research (`data_files.py`) từ vòng 1 nhưng **chưa có đường ingest vào Postgres** như `GPRD`/`GPRC` đã có (`ingest/gpr_daily.py`/`gpr_monthly.py`). Thêm `ingest/ai_gpr.py` — ingest 12 chuỗi TỔNG HỢP (headline/threat/act/oil-tổng/oil-8-vùng/AER/NONOIL) vào `ext_series`, đúng pattern UPSERT idempotent của 2 script ingest cũ. `AI_GPR_COLUMNS` chuyển từ `data_files.py` sang đây làm nguồn CHÍNH THỨC (production là nguồn tên series_id chuẩn), `data_files.py` import lại — đúng chiều phụ thuộc research→ingest đã có sẵn cho GPRD. **Cố ý KHÔNG ingest 4 file "Country Decompositions"** (eventtype/country×eventtype/bilateral/country×vai trò) — cardinality quá lớn, chưa có use case tiêu thụ, IC chưa chứng minh (#6); ingest raw series tổng hợp được sanctioned bởi nguyên tắc #2 ("chỉ ingest"), nhưng ép thêm 1600+ series decomposition chưa dùng vào đâu là khác — đó vẫn là việc riêng, có chủ đích để lại. Thêm `tests/test_ai_gpr_ingest.py` (10 test, mock DB — điểm khác biệt: `ingest/gpr_daily.py`/`gpr_monthly.py` cũ HOÀN TOÀN không có test nào, kể cả offline; module mới có, vì user hỏi rõ "để test"). `load_dataframe`/`to_long` đã chạy thật trên file thật (24319 dòng daily, 799 dòng monthly) — sạch, không lỗi. `upsert()` mock qua `create_engine`, CHƯA chạm Postgres sống (không có DB trong sandbox — cùng giới hạn mọi `ingest/*.py`). Cập nhật lệnh ingest trong CLAUDE.md + đính chính blocker `ai_gpr_data_unverified` (registry) đang mô tả tình trạng cũ (chưa tải) sang tình trạng thật (đã tải+ingest được, chưa chạy Postgres sống). 344 test pass.
+
 ## Trạng thái trước đó (2026-08-05, vòng 1)
 
 ### 🐛 6 bug thật vá trong pipeline serving (rà lại sau khi ship) + ✅ AI-GPR daily xác minh trên file thật
@@ -237,6 +241,8 @@ psql "$DSN" -f sql/002_schema_serving.sql   # statements/statement_scores/ladder
 python -m gpr_engine.ingest.gpr_daily   --path data/data_gpr_daily_recent.xls --dsn "$DSN"
 python -m gpr_engine.ingest.gpr_monthly --path data/data_gpr_export_202607.xls --dsn "$DSN"
 python -m gpr_engine.ingest.market_data --dsn "$DSN" --source fred
+python -m gpr_engine.ingest.ai_gpr --dsn "$DSN" \
+    --path-daily data/ai_gpr_data_daily.csv --path-monthly data/ai_gpr_data_monthly.csv
 ```
 
 **Chạy pipeline serving thật** (sau khi đã ingest ở trên — cần γ đã có ở `docs/reports/data/t2_full_holm_*.csv`, tức đã chạy `run_t2_full.py` ít nhất một lần):
@@ -247,6 +253,27 @@ python scripts/run_news_service.py
 ```
 
 `tests/test_config_locked.py` khóa `config/backtest.yaml` bằng máy: sửa mốc split mà không cập nhật `LOCKED_SPLIT` trong **cùng commit** → test đỏ. Đó là tính năng (nguyên tắc #3), không phải lỗi.
+
+### Docker (mới 2026-08-05)
+
+Đóng gói `Dockerfile` (multi-stage, `python:3.11-slim`) + `docker-compose.yml` (Postgres + Kafka KRaft + app, dùng cho dev/thử nghiệm cục bộ — production thật nên trỏ `GPR_DB_DSN`/`GPR_KAFKA_BOOTSTRAP` sang cụm quản lý riêng, chỉ chạy service `app`). **Chưa build/run được thật trong sandbox này** (Docker daemon không khởi động được trong môi trường Claude Code — đã thử `dockerd` trực tiếp, treo không lỗi, không có quyền cgroup/network cần thiết) — đã kiểm bằng cách khác: mô phỏng chính xác layout COPY của Dockerfile trong venv riêng (`pip install .` từ `pyproject.toml`+`src/`, import tất cả module `ingest`/`pipeline`, chạy `python -m gpr_engine.ingest.ai_gpr --help`, `load_published_gamma()` đọc đúng `docs/reports/data/`) — tất cả PASS. `docker compose config` (không cần daemon) xác nhận YAML hợp lệ. Cả 3 image (`python:3.11-slim`, `postgres:16-alpine`, `apache/kafka:4.3.1`) xác minh tồn tại thật qua Docker Hub API trước khi ghim tag — không đoán tag.
+
+**Cách dùng:**
+```bash
+cp .env.example .env          # điền OPENAI_API_KEY thật, sửa GPR_DB_DSN/GPR_KAFKA_BOOTSTRAP nếu KHÔNG dùng compose
+docker compose up -d postgres kafka
+docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/001_schema_core.sql
+docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/002_schema_serving.sql
+# đặt file GPR đã tải vào ./data/ (mount sẵn vào /app/data trong container)
+docker compose run --rm app python -m gpr_engine.ingest.gpr_daily \
+    --path data/data_gpr_daily_recent.xls \
+    --dsn postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
+# tương tự cho ingest.gpr_monthly / ingest.market_data / ingest.ai_gpr
+docker compose up app          # chạy pipeline serving thật (Kafka consumer)
+```
+Ảnh `app` **không copy `data/`** (file GPR `.xls`/`.csv` là gitignored, do người vận hành cung cấp) — mount qua volume `./data:/app/data`, khớp đúng use case "sau này có file GPR về để xử lý": thả file vào `data/`, chạy lại lệnh ingest tương ứng, không cần rebuild ảnh. Với API tin tức đầu vào: publish JSON khớp schema `Statement` (xem docstring `scripts/run_news_service.py`) vào topic Kafka `GPR_KAFKA_TOPIC_IN` (mặc định `gpr.news.raw`) — bất kỳ ngôn ngữ/hệ thống nào cũng publish được, không cần chạm code Python.
+
+⚠️ **Lưu ý vận hành `--data-version`** (áp dụng cho MỌI script `ingest/*.py`, không riêng Docker): mặc định `--data-version v1` cho mọi lần chạy. Nạp lại file GPR mới mà KHÔNG đổi `--data-version` sẽ UPSERT đè giá trị cũ cùng ngày dưới cùng version — mất khả năng phân biệt "dữ liệu biết tại thời điểm nào" (nguyên tắc #4). Nếu cần giữ lịch sử vintage, đặt `--data-version` mới mỗi lần nạp file mới (vd theo ngày tải). Đây là hạn chế đã có từ trước (ghi trong docstring `ingest/market_data.py`), không phải lỗi Docker.
 
 ## Bản đồ code
 
@@ -279,6 +306,7 @@ Serving — "1 tin vào → 1 kết quả ra" (mới 2026-08-04, xem mục Trạ
 - `pipeline/gamma_lookup.py` — đọc bảng γ đã công bố lọc theo `channel` (`pooled`/`act`/`threat` — ⚠️ đây LÀ biến thể GPRD dùng làm shock, KHÔNG PHẢI kênh truyền dẫn energy/trade/financial/military). `commitment_to_gamma_channel` là proxy tường minh, không phải cùng trục dữ liệu.
 - `pipeline/vn_exposure.py` — tra bảng thuần (từ `vietnam-params.md`), KHÔNG LLM, KHÔNG hồi quy. `has_quant_params` luôn `False` cho tới khi `config/params/vn.yaml` có mục `fitted:`.
 - `service/store.py` — I/O Postgres (schema `sql/002_schema_serving.sql`), cùng pattern `create_engine`+`text()` UPSERT của `ingest/gpr_daily.py`. Không có test DB thật (giống toàn bộ `ingest/*.py`).
+- `ingest/ai_gpr.py` (mới 2026-08-05) — ingest 12 chuỗi TỔNG HỢP AI-GPR (headline/threat/act/oil-tổng/oil-8-vùng/AER/NONOIL) vào `ext_series`, cùng pattern `gpr_daily.py`/`gpr_monthly.py`. `AI_GPR_COLUMNS` chuyển về đây làm nguồn CHÍNH THỨC — `data_files.py` import lại (đúng chiều phụ thuộc research→ingest đã có sẵn cho `GPR_DAILY_SERIES`/`PUBLISH_LAG_DAYS`). ⚠️ **CỐ Ý không ingest 4 file "Country Decompositions"** (eventtype/country×eventtype/bilateral/country×vai trò) — cardinality lớn (tới 1600+ cột), chưa có use case tiêu thụ, IC chưa chứng minh (#6) — ingest 4 file đó là việc riêng khi có lý do. `PUBLISH_LAG_DAYS_DAILY/MONTHLY` là giả định thận trọng chưa verify (cùng trạng thái `gpr_daily.py`/`gpr_monthly.py`). Có test offline (`tests/test_ai_gpr_ingest.py`, mock DB) — phần `load_dataframe`/`to_long` đã chạy thật trên file thật (24319 dòng daily, 799 dòng monthly, parse sạch), phần `upsert` chưa chạm Postgres sống (không có DB trong sandbox).
 - `service/kafka_io.py` — `KafkaResultPublisher` (publish_fn tiêm vào) + `run_consumer_loop` (`confluent-kafka`). Chỉ dùng `bootstrap.servers` — hoạt động như nhau dù broker KRaft hay ZooKeeper.
 - `scripts/run_news_service.py` — entrypoint sống, cấu hình 100% qua biến môi trường (`GPR_DB_DSN`, `GPR_KAFKA_BOOTSTRAP`, `GPR_LLM_MODEL`...), xem docstring đầu file cho danh sách đầy đủ.
 

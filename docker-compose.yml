@@ -1,0 +1,76 @@
+# docker-compose.yml — Postgres + Kafka (KRaft, không Zookeeper) + app, dùng
+# để phát triển/thử nghiệm cục bộ. Không phải khuyến nghị triển khai production
+# nhiều node — cho production thật, trỏ GPR_DB_DSN/GPR_KAFKA_BOOTSTRAP sang
+# cụm Postgres/Kafka quản lý riêng và chỉ chạy service `app`.
+#
+# Chạy:
+#   cp .env.example .env          # điền OPENAI_API_KEY thật
+#   docker compose up -d postgres kafka
+#   # ảnh app KHÔNG có client `psql` (chỉ có driver psycopg2 qua Python) —
+#   # nạp schema qua container postgres, feed file SQL từ host qua stdin:
+#   docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/001_schema_core.sql
+#   docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/002_schema_serving.sql
+#   # DSN gõ thẳng khớp `environment:` của service `postgres` dưới đây (KHÔNG
+#   # dùng $GPR_DB_DSN của SHELL TRÊN HOST — biến đó không tồn tại ở đó, chỉ
+#   # được compose bơm vào BÊN TRONG container `app`; gõ "$GPR_DB_DSN" trên
+#   # host sẽ giãn ra thành CHUỖI RỖNG, --dsn "" âm thầm sai mà không báo lỗi
+#   # rõ ràng ngay):
+#   docker compose run --rm app python -m gpr_engine.ingest.gpr_daily \
+#       --path data/data_gpr_daily_recent.xls \
+#       --dsn postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
+#   docker compose up app                                    # chạy service Kafka consumer thật
+#
+# Kafka image chính thức Apache (apache/kafka), chế độ KRaft (không cần
+# Zookeeper) — khớp phiên bản Kafka user đang dùng.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gpr
+      POSTGRES_PASSWORD: gpr_dev_password
+      POSTGRES_DB: gpr_engine
+    ports:
+      - "5432:5432"
+    volumes:
+      - gpr_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpr -d gpr_engine"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: apache/kafka:4.3.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"   # tiện dev — production nên tạo topic tường minh
+    ports:
+      - "29092:29092"    # truy cập từ host (ngoài mạng compose)
+
+  app:
+    build: .
+    env_file:
+      - .env
+    environment:
+      GPR_DB_DSN: postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
+      GPR_KAFKA_BOOTSTRAP: kafka:9092
+    volumes:
+      # File GPR .xls/.csv tải tay + cache — mount để `docker compose run app
+      # python -m gpr_engine.ingest.*` đọc được mà không cần rebuild ảnh.
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+volumes:
+  gpr_postgres_data:

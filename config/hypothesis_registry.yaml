@@ -119,15 +119,53 @@ decisions:
       quyết định RIÊNG, chưa ký, cần chữ ký mới khi có dữ liệu AI-GPR.
     blocked_by: ai_gpr_data_unverified
 
+  - id: DEC-2026-08-05-event-type-channel   # docs/16 Task 1
+    decided: "2026-08-05"
+    by: "user (ủy quyền theo đề xuất đã ghi ở docs/16 'Đề xuất kênh truyền dẫn từ AI-GPR', phiên 2026-08-05)"
+    what: >
+      Ký `data_files.EVENT_TYPE_TO_CHANNEL` — map 8 loại sự kiện AI-GPR
+      (military_conflict/civil_war/coup/nuclear_threat → military,
+      sanctions → financial, terrorism/diplomatic_tension/other → None
+      "chưa xác định") làm mapping CHÍNH THỨC cho kênh truyền dẫn
+      TRANSMISSION_CHANNELS (energy/trade/financial/military,
+      statement_scorer.py) khi cần gắn nhãn kênh cho dữ liệu AI-GPR chân A.
+      energy và trade KHÔNG suy từ event-type — lấy trực tiếp từ
+      AIGPR_OIL/AIGPR_OIL_<vùng> (đã ingest, daily) và
+      load_ai_gpr_bilateral_monthly() (đã ingest, monthly, paper validate
+      bằng gravity equation).
+    conditions:
+      - "None (terrorism/diplomatic_tension/other) PHẢI giữ None ở mọi nơi
+         dùng mapping — không tự suy diễn thêm để lấp chỗ trống; đó là bậc
+         tự do chưa có bằng chứng để chốt."
+      - "energy/trade KHÔNG được thêm vào EVENT_TYPE_TO_CHANNEL sau này như
+         một cách 'tiện' — nếu ai thêm, đó là quyết định MỚI cần chữ ký
+         riêng (test_event_type_to_channel_has_no_energy_or_trade_mapping
+         khóa lại đúng ranh giới này)."
+      - "Đây là chữ ký cho Ý NGHĨA của mapping, KHÔNG phải cho phép dùng
+         trong đường production nào — mọi điểm nối vào gamma_lookup.py hay
+         pipeline khác vẫn phải qua nguyên tắc #1 (research trước khi vào
+         service), chưa có việc nối dây nào xảy ra cùng chữ ký này."
+    not_yet_decided: >
+      Việc NỐI DÂY thật (ví dụ tách bảng γ theo 4 kênh truyền dẫn thay vì
+      pooled/act/threat như hiện tại, hay dùng mapping này trong
+      vn_exposure.py) là quyết định kiến trúc/kỹ thuật RIÊNG — chữ ký này
+      chỉ xác nhận Ý NGHĨA của mapping, chưa mở khóa việc dùng nó ở đâu.
+    blocked_by: null
+
 # Dữ liệu còn thiếu chặn các nhánh (docs/14 §2 1c) — KHÔNG phải việc code:
 data_blockers:
   ai_gpr_data_unverified: >
-    data/ai_gpr_daily.csv — TẢI TAY từ matteoiacoviello.com/ai_gpr.html (docs/16 §1).
-    CHƯA ai tải, nên `AI_GPR_COLUMNS` trong data_files.py là schema GIẢ ĐỊNH theo
-    mô tả docs/16 §1, chưa đối chiếu file thật (dùng describe_ai_gpr_file()). Rủi
-    ro chưa xác minh: nếu trang chỉ có một file "latest" bị ghi đè mỗi kỳ cập nhật
-    thì không ghim vintage được và report chạy trên nó mất tái lập (#4). Chặn:
-    §9 Phase 1 (recalibrate JUMP, battery AI-GPR, spec kép chạy thật, tier3 VN daily).
+    ⚠️ ĐÃ GỠ MỘT PHẦN (2026-08-05) — GIỮ id để không phá `blocked_by` tham chiếu,
+    nhưng nội dung đổi: file daily+monthly đã TẢI, schema đã XÁC MINH trên file
+    thật (vintage daily `13b8e8b48d41`, monthly `92b9ba3bd38f` — KHÔNG còn giả
+    định như bản cũ ghi). `ingest/ai_gpr.py` (mới) đã ingest được vào ext_series
+    (test end-to-end trên file thật PASS — tests/test_ai_gpr_ingest.py), nhưng
+    CHƯA chạy thật lên Postgres (không có DB sống trong sandbox — cùng giới hạn
+    ingest/gpr_daily.py). Còn treo: PUBLISH_LAG_DAYS_DAILY/MONTHLY trong
+    ingest/ai_gpr.py là GIẢ ĐỊNH THẬN TRỌNG chưa verify với vintage that (cùng
+    trạng thái với gpr_daily.py/gpr_monthly.py, không phải blocker riêng của
+    AI-GPR). Chặn còn lại của §9 Phase 1 (spec kép chạy thật, tier3 VN daily) là
+    việc ƯỚC LƯỢNG/PHÂN TÍCH, không phải thiếu dữ liệu nữa.
   gold_events_csv: "data/gold_events.csv — 2 người dựng tay, KHÔNG tra GPRD (chặn E1c-exo → primary_cell.shock)"
   wui_global_csv: "data/wui_global.csv — tải tay; battery thiếu WUI thì report ghi rõ"
   vn_market_series_missing: "VNINDEX daily — đường nối BeaverX (chặn M3/tier3 VN)"

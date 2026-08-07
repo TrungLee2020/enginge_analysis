@@ -6,7 +6,7 @@
 (ii) **Cơ chế 8 vùng oil không cộng dồn về `GPR_OIL` — đã xác định, không còn "chưa rõ".** Paper: prompt phân loại vùng cho phép chọn **"one or more"** vùng cho một bài báo — bài nói về khủng hoảng ảnh hưởng cả Middle East lẫn Nga được cộng vào tổng của CẢ HAI vùng, nhưng chỉ tính 1 lần vào `GPR_OIL` tổng. Tổng-các-vùng > tổng chung là kỳ vọng đúng của thiết kế, không phải lỗi.
 (iii) **"13 vùng" của v1.0 ĐÚNG theo paper, KHÔNG sai như v1.1/v1.3 kết luận.** Paper liệt kê nguyên văn 13 vùng: Middle East, Russia, USA, Venezuela, North Africa, West Africa, Central Asia, North Sea, Canada, Mexico, Latin America, Southeast Asia, China. 8 cột trong file CSV công khai là bản GOM NHÓM: `Africa`=North+West Africa, `Americas`=Canada+Mexico+Latin America, `Asia`=Central Asia+Southeast Asia+China, 5 vùng còn lại giữ nguyên tên (5+2+3+3=13, khớp số). Suy luận từ tên cột, paper không nói thẳng cách gộp — mức tin cậy cao nhưng không phải trích dẫn trực tiếp.
 (iv) **Phân tích toàn mẫu vai trò VN (1960-2026, không chỉ vài tháng như v1.5 ghi tạm)** — xem §3 bản sửa: khung "VN gần như luôn spillover" của §3 gốc **đúng cho giai đoạn dự án đang dùng (2015-2026)**, **sai như một phát biểu lịch sử chung** (1960-89 VN chủ yếu là respondent, thời chiến tranh Việt Nam).
-(v) **Đề xuất `EVENT_TYPE_TO_CHANNEL`** (mới trong `data_files.py`, CHƯA dùng production) — map 8 loại sự kiện sang 4 kênh truyền dẫn, có lý do từng dòng, xem mục mới bên dưới.
+(v) **Đề xuất `EVENT_TYPE_TO_CHANNEL`** (mới trong `data_files.py`) — map 8 loại sự kiện sang 4 kênh truyền dẫn, có lý do từng dòng, xem mục mới bên dưới. **✅ Đã ký 2026-08-05** (`DEC-2026-08-05-event-type-channel`, `config/hypothesis_registry.yaml`) — chữ ký xác nhận Ý NGHĨA của mapping, CHƯA nối vào production nào.
 
 **Khác v1.3 — sau khi tải 3/4 file "Country Decompositions":** `ai_gpr_eventtype_monthly.csv` (global theo 8 loại sự kiện — **cộng dồn đúng về `GPR_AI`**, khác 8 cột oil-vùng không cộng dồn), `ai_gpr_country_eventtype_monthly.csv` (200 nước × 8 loại, Vietnam có đủ), `ai_gpr_bilateral_monthly.csv` (1200 cặp có hướng, nhiều cặp Vietnam). Thêm `load_ai_gpr_eventtype_monthly()`, `load_ai_gpr_country_eventtype_monthly()` + `select_country_eventtype()`, `load_ai_gpr_bilateral_monthly()` + `select_bilateral_pair()`.
 
@@ -48,9 +48,11 @@
 - `load_ai_gpr_country_monthly()` + `select_country_role()` — 4 vai cộng dồn đúng về `all` (lệch ≤0.0001). Phân tích toàn mẫu vai trò VN chuyển sang §3 bản sửa (không còn là quan sát vài tháng).
 - `load_ai_gpr_country_eventtype_monthly()` + `select_country_eventtype(df, "Vietnam")` — 1602 cột (200 nước × 8 loại), Vietnam xác nhận có đủ.
 - `load_ai_gpr_bilateral_monthly()` + `select_bilateral_pair(df, actor, target)` — 1200 cặp CÓ HƯỚNG (`Actor|Target`, dấu `|` KHÁC quy ước `pair_key()` của `indices.s_gpr` dùng `>`), nhiều cặp có Vietnam. **Paper validate chỉ số này bằng gravity equation thật**: GPR song phương cao hơn đi cùng thương mại song phương THẤP hơn — bằng chứng thực nghiệm rằng bilateral index đo đúng tín hiệu liên quan trade, không phải suy diễn của dự án.
-- `EVENT_TYPE_TO_CHANNEL` (mới) — đề xuất map 8 loại sự kiện sang 4 kênh, **CHƯA dùng ở bất kỳ đường production nào**. Xem mục mới "Đề xuất kênh truyền dẫn từ AI-GPR" bên dưới.
+- `EVENT_TYPE_TO_CHANNEL` (mới) — map 8 loại sự kiện sang 4 kênh, **✅ Ý NGHĨA đã ký** (`DEC-2026-08-05-event-type-channel`) nhưng **CHƯA nối vào bất kỳ đường production nào**. Xem mục mới "Đề xuất kênh truyền dẫn từ AI-GPR" bên dưới.
 
-### Đề xuất kênh truyền dẫn từ AI-GPR (Task 1, 2026-08-05 — CHƯA áp dụng production)
+**✅ Ingest Postgres — `ingest/ai_gpr.py` (mới 2026-08-05).** Trước vòng này, AI-GPR chỉ có đường đọc RESEARCH (`data_files.py`, offline file); khác `GPRD`/`GPRC` vốn có cả `ingest/gpr_daily.py`/`gpr_monthly.py` ghi vào `ext_series` — sản phẩm sản xuất muốn dùng AI-GPR (đọc qua `dataset.load_series(..., as_of=...)` giống GPRD/GPRC) không có đường vào Postgres. Script mới ingest **12 chuỗi TỔNG HỢP** (headline/threat/act/oil-tổng/oil-8-vùng/AER/NONOIL — không phải 4 file "Country Decompositions", xem lý do dưới), cùng pattern UPSERT idempotent với 2 script cũ. `AI_GPR_COLUMNS` chuyển sang đây làm nguồn CHÍNH THỨC (production là nguồn tên series_id chuẩn — đúng chiều phụ thuộc `data_files.py` đã dùng cho `GPR_DAILY_SERIES`). **CỐ Ý KHÔNG ingest 4 file Country Decompositions** — cardinality quá lớn (tới 1602 cột), chưa có nơi tiêu thụ, và IC chưa chứng minh (CLAUDE.md #6: lớp dữ liệu mới phải chứng minh incremental IC trước khi ép vào production) — khác ingest 12 chuỗi tổng hợp vốn được nguyên tắc #2 sanction thẳng ("chỉ ingest, không tự tính lại"). `load_dataframe`/`to_long` đã chạy trên file thật (24319 dòng daily, 799 dòng monthly, sạch). `upsert()` có test mock DB (`tests/test_ai_gpr_ingest.py`) nhưng CHƯA chạm Postgres sống (không có DB trong sandbox — cùng giới hạn mọi `ingest/*.py`).
+
+### Đề xuất kênh truyền dẫn từ AI-GPR (Task 1, 2026-08-05 — ✅ Ý NGHĨA đã ký, CHƯA áp dụng production)
 
 `data_files.EVENT_TYPE_TO_CHANNEL` đề xuất:
 
@@ -66,7 +68,7 @@ Hệ quả thực hành — **energy và trade lấy từ NGUỒN KHÁC, không 
 - **energy**: dùng thẳng `AIGPR_OIL`/`AIGPR_OIL_<vùng>` (đã ingest qua `load_ai_gpr_daily/monthly`) — dữ liệu chuyên biệt, không phải suy diễn.
 - **trade**: dùng `load_ai_gpr_bilateral_monthly()` — paper validate trực tiếp bằng gravity equation (xem trên).
 
-Đây vẫn là **đề xuất chờ xác nhận**, không phải quyết định đã ký như `DEC-2026-08-02-shock-axis` — muốn dùng trong `gamma_lookup.py` production phải qua cùng thủ tục ký quyết định (`config/hypothesis_registry.yaml` §`decisions:`) như các trục khác.
+**✅ Đã ký 2026-08-05** — `DEC-2026-08-05-event-type-channel` (`config/hypothesis_registry.yaml` §`decisions:`, khóa bằng `tests/test_registry_locked.py::test_event_type_channel_decision_matches_code`), cùng thủ tục với `DEC-2026-08-02-shock-axis`. **Phạm vi chữ ký hẹp, đọc kỹ trước khi dùng:** chỉ xác nhận Ý NGHĨA của mapping (8 loại sự kiện → 4 kênh, energy/trade lấy từ nguồn khác) — **KHÔNG** cho phép dùng ngay trong `gamma_lookup.py` hay bất kỳ đường production nào. Nối dây thật (ví dụ tách bảng γ theo 4 kênh truyền dẫn, hay dùng trong `vn_exposure.py`) vẫn là quyết định kiến trúc riêng, phải qua nguyên tắc #1 (research trước khi vào service) trước.
 
 **Không còn file nào thiếu trong danh sách §1.** Toàn bộ 7 series AI-GPR đã biết (headline+threats/acts+oil-vùng ở daily/monthly, eventtype global, country×eventtype, bilateral, country×vai trò) đã tải, xác minh, có loader + test. Việc còn lại là NGHIÊN CỨU (map 8-loại-sự-kiện sang 4-kênh-truyền-dẫn, phân tích vai trò VN đầy đủ, đọc `AI_GPR_PAPER.pdf` cho `GPR_AER`/cơ chế oil-vùng), không phải tải thêm dữ liệu.
 
@@ -136,7 +138,7 @@ Spec đầy đủ: 4 regressor (threat-persistent, threat-shock, act-persistent,
 
 ## 3. VIỆT NAM MỞ KHÓA SỚM — RÚT NGẮN LỚN NHẤT
 
-Chỉ số quốc gia gán ba vai: `initiator` · `respondent` · `spillover`. **VN gần như luôn là spillover** — chịu sốc năng lượng, gián đoạn thương mại, không phải bên khởi phát.
+Chỉ số quốc gia gán ba vai: `initiator` · `respondent` · `spillover`. **VN gần như luôn là spillover** — chịu sốc năng lượng, gián đoạn thương mại, không phải bên khởi phát. **⚠️ Câu này chỉ đúng cho 2015–2026 — xem đính chính + số liệu toàn mẫu 1960–2026 ở §3.1 trước khi dùng câu này để justify bất kỳ giả định kiến trúc nào.**
 
 **⛔ ĐÍNH CHÍNH v1.2 (2026-08-05) — toàn bộ tiền đề của mục này SAI.** Bản v1.1 viết "Country index là **daily**" và dùng đúng câu đó để kết luận "gỡ ràng buộc #10". Đối chiếu với trang download thật (không phải suy luận): file là **`ai_gpr_country_monthly.csv`** — monthly, không phải daily. Tên file tự nói lên granularity, không cần tải mới biết. Hệ quả:
 

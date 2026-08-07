@@ -44,6 +44,7 @@ from gpr_engine.scoring.statement_scorer import (  # noqa: E402
     Statement,
     openai_chat_client,
 )
+from gpr_engine.service import store  # noqa: E402
 from gpr_engine.service.kafka_io import (  # noqa: E402
     DEFAULT_INPUT_TOPIC,
     DEFAULT_OUTPUT_TOPIC,
@@ -86,10 +87,18 @@ def main() -> None:
     config = ScorerConfig(model_version=model_version, training_cutoff=training_cutoff)
     publisher = confluent_publisher(bootstrap)
 
+    # Engine tao MOT LAN cho ca vong doi tien trinh, KHONG tao lai trong handler.
+    # Truoc ban va, process_news_item_live tu goi store.get_engine(dsn) o MOI
+    # LAN GOI (tuc moi message Kafka) -> connection pool SQLAlchemy moi ma
+    # khong bao gio dispose, ro ri connection duoi tai lien tuc thuc te (bug
+    # tim thay khi audit production-readiness 2026-08-05). Tiem engine co san
+    # qua tham so `engine=` de tai su dung dung 1 pool cho toan bo consumer.
+    engine = store.get_engine(dsn)
+
     def handler(payload: dict) -> None:
         stmt = _statement_from_payload(payload)
         result = process_news_item_live(stmt, dsn, llm, config,
-                                         gamma_reports_dir=gamma_dir)
+                                         gamma_reports_dir=gamma_dir, engine=engine)
         key = hashlib.sha256(stmt.text.encode("utf-8")).hexdigest()[:16]
         if isinstance(result, ExcludedResult):
             publisher.publish(topic_out, key, {

@@ -46,6 +46,7 @@ LOCKED_DECISION_IDS = {
     "DEC-2026-08-02-chanb-window",
     "DEC-2026-08-02-sources-trading",
     "DEC-2026-08-03-dual-component",   # docs/16 §2.2, amend shock-axis (§9.1)
+    "DEC-2026-08-05-event-type-channel",  # docs/16 Task 1, EVENT_TYPE_TO_CHANNEL
 }
 REQUIRED_DECISION_FIELDS = {"id", "decided", "by", "what"}
 
@@ -232,6 +233,29 @@ def test_dual_component_keeps_primary_cell_unresolved():
     dec = next(d for d in cfg["decisions"]
                if d["id"] == "DEC-2026-08-03-dual-component")
     assert "UNRESOLVED" in dec["not_yet_decided"]
+
+
+def test_event_type_channel_decision_matches_code():
+    """Chữ ký DEC-2026-08-05-event-type-channel phải khớp EVENT_TYPE_TO_CHANNEL thật.
+
+    Quyết định ký Ý NGHĨA của mapping (docs/16 Task 1) — nếu code đổi mapping
+    (thêm/bớt event type nào đó vào military/financial, hay lỡ gán energy/trade)
+    mà không sửa lại chữ ký cùng commit, đó là rút chữ ký ngầm. Test này bắt.
+    """
+    from gpr_engine.econometrics.data_files import EVENT_TYPE_TO_CHANNEL
+
+    decisions = {d["id"]: d for d in _cfg().get("decisions", [])}
+    dec = decisions["DEC-2026-08-05-event-type-channel"]
+    what = str(dec["what"])
+    for et, channel in EVENT_TYPE_TO_CHANNEL.items():
+        if channel is not None:
+            assert et in what, (
+                f"Chữ ký không nhắc {et}→{channel!r} — cập nhật 'what' cùng commit "
+                "nếu mapping code đổi.")
+    # None (chưa xác định) phải giữ None — chữ ký cấm tự suy diễn thêm để lấp chỗ trống.
+    assert EVENT_TYPE_TO_CHANNEL.get("terrorism") is None
+    assert EVENT_TYPE_TO_CHANNEL.get("diplomatic_tension") is None
+    assert EVENT_TYPE_TO_CHANNEL.get("other") is None
 
 
 def test_holm_families_match_report_axis():

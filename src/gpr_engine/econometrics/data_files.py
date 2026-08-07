@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..ingest.ai_gpr import AI_GPR_COLUMNS
 from ..ingest.gpr_daily import PUBLISH_LAG_DAYS as GPR_DAILY_PUBLISH_LAG_DAYS
 from ..ingest.gpr_daily import SERIES as GPR_DAILY_SERIES
 from ..ingest.market_data import FRED_MAP
@@ -489,22 +490,13 @@ FRED_FREIGHT = "PCU483111483111"
 DEFAULT_AI_GPR_MONTHLY = "data/ai_gpr_data_monthly.csv"
 DEFAULT_AI_GPR_DAILY = "data/ai_gpr_data_daily.csv"
 
-AI_GPR_COLUMNS = {          # ten that trong file -> ten dung trong repo (CA daily lan monthly)
-    "GPR_AI": "AIGPR",
-    "GPR_AER": "AIGPR_AER",              # nghia chua xac minh — xem canh bao tren
-    "GPR_OIL": "AIGPR_OIL",
-    "GPR_NONOIL": "AIGPR_NONOIL",
-    "THREATS_GPR_AI": "AIGPR_THREAT",
-    "ACTS_GPR_AI": "AIGPR_ACT",
-    "GPR_OIL_MiddleEast": "AIGPR_OIL_MIDDLEEAST",
-    "GPR_OIL_Russia": "AIGPR_OIL_RUSSIA",
-    "GPR_OIL_USA": "AIGPR_OIL_USA",
-    "GPR_OIL_Venezuela": "AIGPR_OIL_VENEZUELA",
-    "GPR_OIL_Africa": "AIGPR_OIL_AFRICA",
-    "GPR_OIL_Americas": "AIGPR_OIL_AMERICAS",
-    "GPR_OIL_Asia": "AIGPR_OIL_ASIA",
-    "GPR_OIL_NorthSea": "AIGPR_OIL_NORTHSEA",
-}
+# AI_GPR_COLUMNS (ten that trong file -> ten dung trong repo, CA daily lan
+# monthly) chuyen ve `ingest/ai_gpr.py` lam nguon CHINH THUC (2026-08-05, cung
+# lan them ingest script Postgres) — import lai o day, GIONG HET pattern
+# GPR_DAILY_SERIES/PUBLISH_LAG_DAYS cua ingest/gpr_daily.py. Ly do: ingest la
+# duong PRODUCTION ghi vao ext_series, phai la nguon ten series_id chuan; day
+# la duong RESEARCH offline, dung lai chu khong dinh nghia lai (tranh drift
+# hai ban ten cot). Doi ten cot phai sua o ingest/ai_gpr.py, KHONG sua o day.
 
 _AI_GPR_MISSING_MSG = (
     "Không tìm thấy {path}. AI-GPR là file TẢI TAY (docs/16 §1):\n"
@@ -671,17 +663,22 @@ DEFAULT_AI_GPR_BILATERAL_MONTHLY = "data/ai_gpr_bilateral_monthly.csv"
 # thiết kế của paper: định nghĩa "spillover" của paper liệt kê energy
 # shock/trade disruption như VÍ DỤ CƠ CHẾ lan tỏa, không phải một loại sự
 # kiện. Vì vậy KHÔNG có cách nào map 1-1 sạch — xem `EVENT_TYPE_TO_CHANNEL`
-# (đề xuất, CHƯA dùng trong production) ngay dưới đây.
+# (Ý NGHĨA đã ký `DEC-2026-08-05-event-type-channel`, chưa nối vào production
+# nào) ngay dưới đây.
 AI_GPR_EVENT_TYPES = (
     "military_conflict", "diplomatic_tension", "terrorism", "civil_war",
     "nuclear_threat", "coup", "sanctions", "other",
 )
 
-# ĐỀ XUẤT map 8 loại sự kiện -> 4 kênh truyền dẫn — CHƯA DÙNG Ở BẤT KỲ ĐƯỜNG
-# PRODUCTION NÀO (gamma_lookup.py vẫn chỉ dùng pooled/act/threat như cũ). Đây
-# là quyết định thiết kế cần XÁC NHẬN trước khi dùng, không phải sự thật đã
-# kiểm định — cùng tinh thần `CHANNEL_TO_TRANSMISSION` trong statement_scorer.py
-# (chỉ điền cặp hiển nhiên, còn lại None).
+# Map 8 loại sự kiện -> 4 kênh truyền dẫn — Ý NGHĨA đã KÝ (2026-08-05,
+# `DEC-2026-08-05-event-type-channel`, config/hypothesis_registry.yaml
+# `decisions:`, khóa bằng test_event_type_channel_decision_matches_code).
+# ⚠️ Chữ ký chỉ xác nhận Ý NGHĨA của mapping — CHƯA nối vào bất kỳ đường
+# production nào (gamma_lookup.py vẫn chỉ dùng pooled/act/threat như cũ, đó
+# là biến thể GPRD dùng làm shock, KHÔNG PHẢI trục 4 kênh này). Nối dây thật
+# (nếu có) là quyết định kiến trúc/kỹ thuật RIÊNG, vẫn phải qua nguyên tắc #1
+# (research trước khi vào service). Cùng tinh thần `CHANNEL_TO_TRANSMISSION`
+# trong statement_scorer.py (chỉ điền cặp hiển nhiên, còn lại None).
 #
 # Lý do từng dòng:
 #   military_conflict, civil_war, coup, nuclear_threat -> military: cả bốn
