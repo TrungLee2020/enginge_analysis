@@ -37,8 +37,23 @@ với key thật để BIẾT, không đoán. Nếu Gemini trả JSON không đ�
 đoán JSON còn thiếu là gì (statement_scorer.parse_score đã tự retry 1 lần
 kèm thông báo lỗi gửi lại cho model trước khi raise hẳn).
 
+vLLM tự host cũng đi đúng đường này (đã chạy thật với Qwen3-14B-AWQ): đặt
+VLLM_API_BASE + VLLM_MODEL (+ VLLM_API_KEY, mặc định "EMPTY"). Script tự thêm
+hậu tố `/v1` nếu thiếu. Qwen3 tôn trọng `response_format={"type":"json_object"}`
+qua guided decoding của vLLM nên KHÔNG rò khối `<think>` — không cần
+`enable_thinking=false`; nếu đổi sang server không hỗ trợ JSON mode thì thân
+`<think>` sẽ làm `parse_score` raise, đó là dấu hiệu cần bật guided decoding.
+
+Biến môi trường: script tự nạp `.env` ở repo root (KEY=value, biến đã export ở
+shell thắng, không bị ghi đè). Có sẵn nhiều bộ trong `.env` thì `--provider`
+chọn tay; auto ưu tiên OPENAI_API_KEY > VLLM_API_BASE > GEMINI_API_KEY.
+
 Chạy:
-  # chỉ test LLM (không DB, không Kafka):
+  # chỉ test LLM (không DB, không Kafka) — cấu hình lấy từ .env:
+  python scripts/test_llm_and_db.py
+  python scripts/test_llm_and_db.py --provider vllm      # ép dùng vLLM nội bộ
+
+  # hoặc truyền tường minh, ghi đè .env:
   GEMINI_API_KEY=... GPR_LLM_MODEL=gemini-2.0-flash python scripts/test_llm_and_db.py
 
   # test cả ghi Postgres thật (cần: docker compose up -d postgres, đã nạp
@@ -57,7 +72,8 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from gpr_engine.scoring.statement_scorer import (
     ScoreParseError,
@@ -78,20 +94,94 @@ DEFAULT_TEXT = (
 )
 
 
-def _resolve_llm_env() -> tuple[str, str | None]:
-    """Tra (api_key, base_url). Uu tien OPENAI_API_KEY neu co san (khong doi
-    hanh vi cu). Thieu no ma co GEMINI_API_KEY -> map sang endpoint Gemini,
-    TRU KHI OPENAI_BASE_URL da dat tuong minh (nguoi dung biet ro minh muon
-    tro di dau, khong doan thay)."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    base_url = os.environ.get("OPENAI_BASE_URL")
-    if api_key:
-        return api_key, base_url
+def _load_dotenv(path: Path) -> None:
+    """Nạp `.env` ở repo root vào os.environ.
+
+    Cùng ngữ nghĩa với `python-dotenv`: biến ĐÃ có trong môi trường thắng
+    (không ghi đè) — chạy `GPR_LLM_MODEL=x python scripts/...` vẫn ưu tiên giá
+    trị gõ ở dòng lệnh. Dùng python-dotenv nếu có (xử lý quote/multiline đầy
+    đủ); không có thì parser tối giản bên dưới đủ cho định dạng KEY=value mà
+    docker-compose `env_file` cũng chấp nhận — script test không nên chết chỉ
+    vì thiếu một dependency tuỳ chọn.
+    """
+    if not path.exists():
+        return
+    try:
+        from dotenv import load_dotenv  # type: ignore[import-not-found]
+    except ImportError:
+        pass
+    else:
+        load_dotenv(path, override=False)
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _resolve_llm_env(provider: str) -> tuple[str, str, str | None, str]:
+    """Tra (provider_da_chon, api_key, base_url, model).
+
+    `provider="auto"` chon theo thu tu OPENAI -> VLLM -> GEMINI: OPENAI_API_KEY
+    tuong minh thang truoc (khong doi hanh vi cu), roi den vLLM tu host (endpoint
+    rieng thi khong ai dat nham), cuoi cung Gemini. Dat --provider de chon tay
+    khi .env co san nhieu hon mot bo (truong hop thuong gap: vua giu key Gemini
+    vua tro vLLM noi bo).
+
+    MOI provider mang theo TEN MODEL cua chinh no — gui `gemini-2.0-flash` sang
+    vLLM la 404, nen GPR_LLM_MODEL (bien chung, dung cho OpenAI/Gemini) KHONG duoc
+    tran sang nhanh vLLM; nhanh do lay VLLM_MODEL.
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    openai_base = os.environ.get("OPENAI_BASE_URL")
+    vllm_base = os.environ.get("VLLM_API_BASE")
     gemini_key = os.environ.get("GEMINI_API_KEY")
-    if not gemini_key:
-        raise RuntimeError(
-            "Thiếu OPENAI_API_KEY hoặc GEMINI_API_KEY — cần đúng một trong hai.")
-    return gemini_key, base_url or GEMINI_OPENAI_COMPAT_BASE_URL
+    generic_model = os.environ.get("GPR_LLM_MODEL")
+
+    if provider == "auto":
+        provider = ("openai" if openai_key else
+                    "vllm" if vllm_base else
+                    "gemini" if gemini_key else "none")
+
+    if provider == "openai":
+        if not openai_key:
+            raise RuntimeError("provider=openai nhưng thiếu OPENAI_API_KEY.")
+        return provider, openai_key, openai_base, generic_model or "gpt-4o-mini"
+
+    if provider == "vllm":
+        if not vllm_base:
+            raise RuntimeError("provider=vllm nhưng thiếu VLLM_API_BASE.")
+        model = os.environ.get("VLLM_MODEL")
+        if not model:
+            raise RuntimeError(
+                "provider=vllm nhưng thiếu VLLM_MODEL — phải khớp `id` mà server "
+                "báo ở GET {}/models, không đoán hộ.".format(vllm_base.rstrip("/")))
+        # vLLM mount API tuong thich OpenAI tai /v1; SDK noi duoi
+        # "/chat/completions" -> thieu /v1 la 404. Them neu chua co, khong ep
+        # nguoi dung nho quy uoc nay.
+        base = vllm_base.rstrip("/")
+        if not base.endswith("/v1"):
+            base += "/v1"
+        # SDK OpenAI raise neu api_key rong; "EMPTY" la quy uoc cua vLLM khi
+        # server chay khong bat --api-key.
+        return provider, os.environ.get("VLLM_API_KEY") or "EMPTY", base, model
+
+    if provider == "gemini":
+        if not gemini_key:
+            raise RuntimeError("provider=gemini nhưng thiếu GEMINI_API_KEY.")
+        return (provider, gemini_key,
+                openai_base or GEMINI_OPENAI_COMPAT_BASE_URL,
+                generic_model or "gpt-4o-mini")
+
+    raise RuntimeError(
+        "Không tìm thấy cấu hình LLM nào — cần OPENAI_API_KEY, hoặc VLLM_API_BASE"
+        " + VLLM_MODEL, hoặc GEMINI_API_KEY. Đặt trong .env ở repo root (script "
+        "tự nạp) hoặc export ở shell.")
 
 
 def main() -> None:
@@ -105,15 +195,19 @@ def main() -> None:
                     help="Phải thuộc DEFAULT_ROLE_WEIGHTS_INIT (s_gpr.py): "
                          "head_of_state|minister|spokesperson|central_bank_governor")
     ap.add_argument("--source", default="manual_test")
+    ap.add_argument("--provider", default="auto",
+                    choices=["auto", "openai", "vllm", "gemini"],
+                    help="auto = OPENAI_API_KEY > VLLM_API_BASE > GEMINI_API_KEY.")
     args = ap.parse_args()
 
-    api_key, base_url = _resolve_llm_env()
-    model = os.environ.get("GPR_LLM_MODEL", "gpt-4o-mini")
+    _load_dotenv(REPO_ROOT / ".env")
+    provider, api_key, base_url, model = _resolve_llm_env(args.provider)
     training_cutoff_raw = os.environ.get("GPR_TRAINING_CUTOFF")
     training_cutoff = (pd.Timestamp(training_cutoff_raw).date()
                        if training_cutoff_raw else dt.datetime.now(dt.UTC).date())
 
-    print(f"[test_llm_and_db] model={model} base_url={base_url or '(OpenAI mặc định)'}")
+    print(f"[test_llm_and_db] provider={provider} model={model} "
+          f"base_url={base_url or '(OpenAI mặc định)'}")
     llm = openai_chat_client(model=model, base_url=base_url, api_key=api_key)
     config = ScorerConfig(model_version=model, training_cutoff=training_cutoff)
 

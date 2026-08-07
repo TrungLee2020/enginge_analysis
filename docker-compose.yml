@@ -31,7 +31,14 @@ services:
       POSTGRES_PASSWORD: gpr_dev_password
       POSTGRES_DB: gpr_engine
     ports:
-      - "5432:5432"
+      # Cổng HOST đổi được vì 5432 rất hay bị Postgres cài sẵn trên máy chiếm
+      # (WSL/Linux: `pg_lsclusters`; macOS: Postgres.app). Khi đó listener native
+      # thắng, container bị che, và lỗi hiện ra là "password authentication failed
+      # for user gpr" — trông như sai mật khẩu chứ không giống xung đột cổng, vì
+      # server trả lời là server KHÁC, nơi role `gpr` không tồn tại.
+      # Đặt GPR_POSTGRES_HOST_PORT trong .env để né. Cổng TRONG mạng compose luôn
+      # là 5432 -> DSN của service `app` (postgres:5432) không đổi theo biến này.
+      - "${GPR_POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - gpr_postgres_data:/var/lib/postgresql/data
     healthcheck:

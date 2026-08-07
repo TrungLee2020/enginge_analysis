@@ -75,6 +75,11 @@ def test_integer_fallback_only_for_integers():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("text", [
     "data_version `f2579b30928f`, commit `72c4704`.",
+    # Bug thật: `news_pipeline` truyền TÊN FILE γ làm data_version. Chỉ miễn hash
+    # trần là không đủ — hash trong tên file bị regex "mốc năm" cắt 4 chữ số đầu,
+    # đuôi `30928` thành token vô chủ và guard chặn mọi tin trên đường serving.
+    "data_version `t2_full_holm_f2579b30928f.csv` · commit `n/a`",
+    "Đọc `docs/reports/data/tier2_irf_innovation_8cc9bfb5c3b6_ar5-5-2.csv`.",
     "Sinh lúc 2026-08-03T10:00:00.",
     "Theo docs/14 §6.6 và SCA-01.",
     "Quyết định DEC-2026-08-02-shock-axis đã ký.",
@@ -84,6 +89,19 @@ def test_integer_fallback_only_for_integers():
 ])
 def test_does_not_flag_references(text):
     assert check_narrative(text, PAYLOAD).ok, f"bắt nhầm: {text!r}"
+
+
+@pytest.mark.parametrize("text", [
+    "Hệ số là `2.77` lần ngày thường.",          # số trần trong backtick
+    "Ghi chú: `tăng 1.8 lần so với nền`.",       # văn xuôi mang số, nhét backtick
+])
+def test_backtick_does_not_hide_numbers(text):
+    """Miễn trừ code span CHỈ dành cho định danh một token.
+
+    Nếu nới thành "mọi thứ trong backtick" thì bọc backtick là cách né guard —
+    đúng loại lỗi (số bịa trong narrative) mà P1 sinh ra để chặn.
+    """
+    assert not check_narrative(text, PAYLOAD).ok, f"lọt qua guard: {text!r}"
 
 
 def test_skips_markdown_tables_by_default():

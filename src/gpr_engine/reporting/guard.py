@@ -29,7 +29,16 @@ NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 # Pattern KHÔNG phải "số kết quả" — gỡ trước khi soi. Thứ tự có ý nghĩa.
 _STRIP = (
-    r"`[0-9a-f]{6,}`",              # hash: data_version, commit
+    # Định danh trong code span: hash, commit, và TÊN FILE report
+    # (`t2_full_holm_f2579b30928f.csv`). Bản đầu chỉ khớp hash hex TRẦN
+    # (`[0-9a-f]{6,}`) nên tên file lọt qua: hash bên trong bị regex "mốc năm"
+    # bên dưới cắt mất 4 chữ số đầu, phần đuôi `30928` thành token số vô chủ và
+    # guard chặn MỌI tin — `news_pipeline` truyền chính tên file γ làm
+    # `data_version`, nên đường serving sống không chạy nổi một tin nào.
+    # Điều kiện "có ít nhất một chữ cái/gạch dưới, KHÔNG chứa khoảng trắng" giữ
+    # nguyên răng của guard: `2.77` trong backtick vẫn bị kiểm, văn xuôi mang số
+    # nhét vào backtick cũng vậy — chỉ định danh một token mới được miễn.
+    r"`[\w.\-/]*[A-Za-z_][\w.\-/]*`",
     r"\d{4}-\d{2}-\d{2}[T0-9:]*",   # ngày ISO
     r"\b\d{1,2}:\d{2}(?::\d{2})?\b",  # giờ 14:07 — timestamp, không phải kết quả
     # Ngày dd/mm[/yyyy]. Tháng phải ≤12 nên "23/72 ô" (tỉ lệ THẬT, phải kiểm)
