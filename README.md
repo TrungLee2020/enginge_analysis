@@ -10,6 +10,10 @@ Lượng tử hóa rủi ro địa chính trị từ tin tức/phát ngôn/sự 
 4. `docs/01_research_methodology.md` — nền tảng học thuật, danh sách kiểm định.
 5. `docs/02_engineering_plan.md` — chi tiết service, schema, rủi ro.
 
+## Chạy bằng Docker
+
+`docker compose up -d postgres kafka` (Postgres + Kafka KRaft cục bộ), nạp schema, ingest file GPR, rồi `docker compose up app` chạy pipeline serving thật. Chi tiết đầy đủ ở mục "Docker" trong `CLAUDE.md`.
+
 ## Bắt đầu (G1)
 
 ```bash

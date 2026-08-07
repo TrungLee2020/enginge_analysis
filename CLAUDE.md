@@ -254,6 +254,27 @@ python scripts/run_news_service.py
 
 `tests/test_config_locked.py` khóa `config/backtest.yaml` bằng máy: sửa mốc split mà không cập nhật `LOCKED_SPLIT` trong **cùng commit** → test đỏ. Đó là tính năng (nguyên tắc #3), không phải lỗi.
 
+### Docker (mới 2026-08-05)
+
+Đóng gói `Dockerfile` (multi-stage, `python:3.11-slim`) + `docker-compose.yml` (Postgres + Kafka KRaft + app, dùng cho dev/thử nghiệm cục bộ — production thật nên trỏ `GPR_DB_DSN`/`GPR_KAFKA_BOOTSTRAP` sang cụm quản lý riêng, chỉ chạy service `app`). **Chưa build/run được thật trong sandbox này** (Docker daemon không khởi động được trong môi trường Claude Code — đã thử `dockerd` trực tiếp, treo không lỗi, không có quyền cgroup/network cần thiết) — đã kiểm bằng cách khác: mô phỏng chính xác layout COPY của Dockerfile trong venv riêng (`pip install .` từ `pyproject.toml`+`src/`, import tất cả module `ingest`/`pipeline`, chạy `python -m gpr_engine.ingest.ai_gpr --help`, `load_published_gamma()` đọc đúng `docs/reports/data/`) — tất cả PASS. `docker compose config` (không cần daemon) xác nhận YAML hợp lệ. Cả 3 image (`python:3.11-slim`, `postgres:16-alpine`, `apache/kafka:4.3.1`) xác minh tồn tại thật qua Docker Hub API trước khi ghim tag — không đoán tag.
+
+**Cách dùng:**
+```bash
+cp .env.example .env          # điền OPENAI_API_KEY thật, sửa GPR_DB_DSN/GPR_KAFKA_BOOTSTRAP nếu KHÔNG dùng compose
+docker compose up -d postgres kafka
+docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/001_schema_core.sql
+docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/002_schema_serving.sql
+# đặt file GPR đã tải vào ./data/ (mount sẵn vào /app/data trong container)
+docker compose run --rm app python -m gpr_engine.ingest.gpr_daily \
+    --path data/data_gpr_daily_recent.xls \
+    --dsn postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
+# tương tự cho ingest.gpr_monthly / ingest.market_data / ingest.ai_gpr
+docker compose up app          # chạy pipeline serving thật (Kafka consumer)
+```
+Ảnh `app` **không copy `data/`** (file GPR `.xls`/`.csv` là gitignored, do người vận hành cung cấp) — mount qua volume `./data:/app/data`, khớp đúng use case "sau này có file GPR về để xử lý": thả file vào `data/`, chạy lại lệnh ingest tương ứng, không cần rebuild ảnh. Với API tin tức đầu vào: publish JSON khớp schema `Statement` (xem docstring `scripts/run_news_service.py`) vào topic Kafka `GPR_KAFKA_TOPIC_IN` (mặc định `gpr.news.raw`) — bất kỳ ngôn ngữ/hệ thống nào cũng publish được, không cần chạm code Python.
+
+⚠️ **Lưu ý vận hành `--data-version`** (áp dụng cho MỌI script `ingest/*.py`, không riêng Docker): mặc định `--data-version v1` cho mọi lần chạy. Nạp lại file GPR mới mà KHÔNG đổi `--data-version` sẽ UPSERT đè giá trị cũ cùng ngày dưới cùng version — mất khả năng phân biệt "dữ liệu biết tại thời điểm nào" (nguyên tắc #4). Nếu cần giữ lịch sử vintage, đặt `--data-version` mới mỗi lần nạp file mới (vd theo ngày tải). Đây là hạn chế đã có từ trước (ghi trong docstring `ingest/market_data.py`), không phải lỗi Docker.
+
 ## Bản đồ code
 
 **6 module còn là stub `raise NotImplementedError` ngay khi import** — chưa viết, không phải hỏng. Import chúng là crash. Còn stub: `econometrics/{surprise, tvp_var}`, `indices/{builder, divergence}`, `backtest/*` (2). Mọi thứ khác đã thực thi. (docs/11 §4 §7 có bảng module đầy đủ + việc cần làm cho từng cái, gồm cả module mới chưa tồn tại: `econometrics/analogue.py`, `scoring/{policy_scorer,track_record}.py`.)

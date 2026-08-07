@@ -1,0 +1,20 @@
+# Loại khỏi build context — Dockerfile chỉ COPY đích danh những gì cần
+# (src/, scripts/, sql/, config/, docs/reports/data/), nhưng loại các thư mục
+# nặng/không liên quan ở đây để build context gửi lên daemon nhỏ, nhanh.
+.git
+.gitignore
+.venv
+.pytest_cache
+.ruff_cache
+.serena
+.claude
+__pycache__
+*.pyc
+notebooks/
+tests/
+data/*.xls
+data/*.xlsx
+data/*.csv
+data/cache/
+.env
+*.log
