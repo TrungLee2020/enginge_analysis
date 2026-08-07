@@ -49,13 +49,23 @@ def commitment_to_gamma_channel(commitment: str) -> str:
 
 
 def _latest_gamma_file(reports_dir: Path, glob_pattern: str) -> Path:
-    files = sorted(reports_dir.glob(glob_pattern))
+    files = list(reports_dir.glob(glob_pattern))
     if not files:
         raise FileNotFoundError(
             f"Không thấy {glob_pattern} trong {reports_dir}. Chạy "
             "`python scripts/run_t2_full.py` trước — pipeline đọc từ bảng γ đã "
             "công bố, không tự ước lượng lại (docs/14 §8).")
-    return files[-1]
+    # Bug đã vá (audit production-readiness 2026-08-05): tên file là
+    # `t2_full_holm_<content-hash>.csv` (docs/g0 quy ước versioned report,
+    # không GHI ĐÈ mỗi lần chạy lại `run_t2_full.py`) — hash KHÔNG mang thứ
+    # tự thời gian. `sorted(files)[-1]` cũ sắp xếp theo CHUỖI TÊN FILE (tức
+    # theo hash), không phải theo thời điểm tạo — khi có ≥2 file khớp
+    # glob_pattern, "file cuối cùng theo alphabet" có thể là file CŨ HƠN,
+    # chọn sai γ mà không có dấu hiệu nào (không raise, không log). Rủi ro
+    # thật khi `run_t2_full.py` được chạy lại nhiều lần theo thời gian (đúng
+    # kịch bản dữ liệu GPR mới về định kỳ) — sắp theo `st_mtime` (thời điểm
+    # sửa file gần nhất) mới đúng nghĩa "mới nhất".
+    return max(files, key=lambda p: p.stat().st_mtime)
 
 
 def load_published_gamma(

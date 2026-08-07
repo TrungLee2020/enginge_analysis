@@ -76,3 +76,26 @@ def test_invalid_channel_raises(gamma_dir):
 def test_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_published_gamma("act", reports_dir=tmp_path)
+
+
+def test_picks_most_recently_MODIFIED_file_not_alphabetically_last(tmp_path):
+    """Bug da va (audit production-readiness 2026-08-05): ten file mang HASH
+    NOI DUNG (t2_full_holm_<hash>.csv), khong mang thu tu thoi gian. Ban cu
+    sort()[-1] chon file "cuoi cung theo alphabet" — chon SAI khi file MOI
+    HON co hash sap truoc file CU HON theo alphabet. Dung mtime moi dung
+    nghia "moi nhat" — kich ban thuc te khi chay lai run_t2_full.py nhieu
+    lan theo thoi gian (du lieu GPR ve dinh ky)."""
+    import time
+
+    d = tmp_path / "data"
+    d.mkdir()
+    old = d / "t2_full_holm_zzz_old.csv"     # sap SAU theo alphabet nhung CU HON
+    new = d / "t2_full_holm_aaa_new.csv"     # sap TRUOC theo alphabet nhung MOI HON
+    old.write_text(CSV_HEADER + "\n" + ROWS[0] + "\n", encoding="utf-8")
+    time.sleep(0.01)
+    new_row = ROWS[0].replace(",oil,", ",vix,")   # noi dung khac de phan biet duoc file nao duoc doc
+    new.write_text(CSV_HEADER + "\n" + new_row + "\n", encoding="utf-8")
+
+    cells, fname = load_published_gamma("act", reports_dir=tmp_path)
+    assert fname == "t2_full_holm_aaa_new.csv"
+    assert cells[0].outcome.startswith("vix")
