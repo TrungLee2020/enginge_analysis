@@ -262,12 +262,15 @@ def main() -> None:
              "(hoặc câu mẫu không nêu tên nước) — S-GPR/Ladder/measurement_card "
              "bị bỏ qua ĐÚNG THIẾT KẾ, không phải lỗi. Dùng --text để truyền câu "
              "khác có nêu rõ nước.")
-    elif not result.ladder_computed and result.measurement_card_error:
-        # Ly do THAT ladder_computed=False — thieu dong nay truoc day khien
-        # ket qua "S-GPR=0/ladder=0" trong giong loi trong khi co the chi la
-        # suy giam co kiem soat (vd Guard P1 chan rationale, hoac role la —
-        # xem news_pipeline.py comment o KeyError/GuardViolation).
-        print(f"  -> lý do: {result.measurement_card_error}")
+    # `measurement_card_error` co the duoc set du `ladder_computed=True`: trong
+    # news_pipeline.process_news_item, `ladder_computed = True` (dong 305) xay
+    # ra TRUOC loi goi compose_measurement_card() (dong 326) — neu Guard P1
+    # (GuardViolation/ClaimCeilingViolation) chan `rationale` cua LLM ngay o
+    # buoc do, ladder van tinh xong nhung card van None. Ban dau chi kiem tra
+    # "not ladder_computed" nen bo lot dung truong hop nay — sua theo dieu
+    # kien THAT: card=None + co error.
+    if result.measurement_card is None and result.measurement_card_error:
+        print(f"  -> lý do measurement_card=None: {result.measurement_card_error}")
     print(f"Transmission channel={result.transmission_channel}")
     print("\nMeasurement card:\n", result.measurement_card)
     print("\nMacro brief:\n", result.macro_brief)
