@@ -246,6 +246,12 @@ def main() -> None:
 
     print(f"S-GPR now={result.s_gpr_now} prev={result.s_gpr_prev} pctile={result.s_gpr_pctile}")
     print(f"Ladder state={result.ladder_state} (computed={result.ladder_computed})")
+    if not result.ladder_computed and result.measurement_card_error:
+        # Ly do THAT ladder_computed=False — thieu dong nay truoc day khien
+        # ket qua "S-GPR=0/ladder=0" trong giong loi trong khi co the chi la
+        # suy giam co kiem soat (vd Guard P1 chan rationale, hoac role la —
+        # xem news_pipeline.py comment o KeyError/GuardViolation).
+        print(f"  -> lý do: {result.measurement_card_error}")
     print(f"Transmission channel={result.transmission_channel}")
     print("\nMeasurement card:\n", result.measurement_card)
     print("\nMacro brief:\n", result.macro_brief)
