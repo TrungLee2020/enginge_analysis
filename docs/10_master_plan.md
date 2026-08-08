@@ -1,8 +1,9 @@
-# 17 — MASTER PLAN "GPR LIVE" (bản đã kiểm chứng)
+# 10 — MASTER PLAN "GPR LIVE" (bản đã kiểm chứng)
 
-**Phiên bản:** 1.1 — 2026-08-08. Dựa trên bản tổng hợp v1.0 của user (đề "10 — MASTER PLAN").
-**Đánh số:** user đề "docs/10" nhưng `docs/10_action_plan.md` ĐÃ TỒN TẠI (2026-07-16, kế hoạch Phase F). Ghi đè số 10 sẽ xóa lịch sử quyết định đang được `docs/16`, `g0_governance.md` tham chiếu → dùng số **17** (số trống kế tiếp). Nội dung không đổi vì số.
-**Quan hệ:** thay thế vai trò ĐỊNH HƯỚNG SẢN PHẨM của `11`, `13`, `14`, `15`, `16`. **Chưa archive 5 doc đó** — lý do ở §D2.
+**File:** `docs/10_master_plan.md`
+**Phiên bản:** 1.1 — 2026-08-08. Dựa trên bản tổng hợp v1.0 của user.
+**⚠️ Trùng tiền tố số với `docs/10_action_plan.md`** (2026-07-16, kế hoạch Phase F — vẫn hiệu lực, KHÔNG bị file này thay thế). Hai file khác tên nên không ghi đè nhau, nhưng **~25 tham chiếu trong code viết dạng "docs/10 F3", "docs/10 D2", "docs/10 §5"** (`shocks.py`, `data_files.py`, `tier3_country.py`) trỏ về `10_action_plan.md`. Quy ước từ nay: **trích dẫn kèm tên file đầy đủ** (`docs/10_master_plan.md §4.1`), không viết "docs/10 §..." trần. Cùng quy ước cho `docs/11_build_spec.md` vs `docs/11_product_plan.md`.
+**Quan hệ:** thay thế vai trò ĐỊNH HƯỚNG SẢN PHẨM của `11_product_plan.md`, `13_e1c_and_grid_plan.md`, `14_product_completion_plan.md`, `15_global_pipline.md`, `16_ai_gpr_supplement.md`. **Chưa archive 5 doc đó** — lý do ở §D2. Bản đồ code đi kèm: `docs/11_build_spec.md`.
 **Vẫn hiệu lực, không gộp:** `CLAUDE.md` (12 nguyên tắc — §2 dưới đây chỉ là tập con hướng sản phẩm) · `g0_governance.md` · `12_specification_curve_protocol.md` · `00_engine_design.md`.
 
 > **Cách đọc doc này.** §1–§6 là kế hoạch (đã sửa). §7 là quyết định thật sự còn mở. §A–§D là **nhật ký kiểm chứng**: 6 chỗ v1.0 sai/đuối so với file và code thật, kèm số đo lại. Mọi số trong §A sinh bởi `scripts/check_master_plan_claims.py` — chạy lại được, không gõ tay (Guard P1).
@@ -306,5 +307,5 @@ Mọi số ở §A sinh bởi `python scripts/check_master_plan_claims.py` (đ�
 
 ## §D. Đánh số & lưu trữ
 
-- **D1** — `docs/10_action_plan.md` đã tồn tại → bản này là `docs/17_master_plan.md`.
+- **D1** — Tên file giữ đúng như user đặt: `docs/10_master_plan.md` + `docs/11_build_spec.md`. Không có xung đột file: `10_action_plan.md` và `11_product_plan.md` là tên khác, cùng tồn tại được. Rủi ro còn lại **không phải ghi đè mà là tham chiếu mơ hồ** — code đang có ~40 chỗ viết "docs/10 F3", "docs/11 §6" trần, giờ trỏ được vào hai file. Quy ước bắt buộc từ nay: trích dẫn kèm tên file đầy đủ.
 - **D2** — **Chưa** chuyển `11/13/14/15/16` sang `docs/archive/`. Lý do: chính 5 doc đó (đặc biệt `docs/16` §3, đã tự đính chính **hai lần** về granularity) mang những đính chính mà v1.0 làm mất — archive trước khi bản chốt hấp thụ hết là chôn luôn đường kiểm chứng. Archive sau khi §7 #1/#2/#8 có chữ ký và §A được xác nhận.

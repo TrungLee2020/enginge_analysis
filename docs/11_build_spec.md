@@ -1,8 +1,9 @@
-# 18 — BUILD SPEC (Python), bản đã đối chiếu code
+# 11 — BUILD SPEC (Python), bản đã đối chiếu code
 
-**Phiên bản:** 1.1 — 2026-08-08. Dựa trên bản v1.0 của user (đề "11 — BUILD SPEC").
-**Đánh số:** user đề "docs/11" nhưng `docs/11_product_plan.md` đã tồn tại → dùng **18** (cùng lý do như `docs/17`, §D1 ở đó).
-**Vai trò:** bản đồ code cho `docs/17_master_plan.md`. Doc 17 nói *làm gì*; doc này nói *code ở đâu, hàm gì, thứ tự nào*.
+**File:** `docs/11_build_spec.md`
+**Phiên bản:** 1.1 — 2026-08-08. Dựa trên bản v1.0 của user.
+**Vai trò:** bản đồ code cho `docs/10_master_plan.md`. Doc master plan nói *làm gì*; doc này nói *code ở đâu, hàm gì, thứ tự nào*.
+**⚠️ Trùng tiền tố số với `docs/11_product_plan.md`** (bản này thay vai trò định hướng sản phẩm của nó, nhưng ~15 tham chiếu trong code viết dạng "docs/11 §5.3", "docs/11 §6" — `analogue.py`, `panel_var.py`, `composer.py`, `guard.py`, `data_files.py` — trỏ về `11_product_plan.md`). Quy ước: **trích dẫn kèm tên file đầy đủ**, không viết "docs/11 §..." trần. Khi archive `11_product_plan.md`, phải cập nhật các tham chiếu đó cùng commit.
 
 > **Kết luận rà soát trong một câu:** §1 (tách offline/online bằng artifact) là **đóng góp lớn nhất và đúng** — nó vá một khớp nối đang lỏng thật trong code. §2 (layout) **đắt hơn giá trị nó mang lại** dưới dạng đổi tên, vì ~11 module bị đánh dấu "cần viết/stub" **đã tồn tại và đã chạy**. §3 (schema) có **một lỗi vi phạm chữ ký đã ký** phải sửa trước khi code. Chi tiết ở §E.
 
@@ -63,7 +64,7 @@ Layout v1.0 gọn hơn thật. Nhưng bảng dưới là đối chiếu từng d
 | — (không nhắc) | **Stub thật**: `econometrics/{surprise,tvp_var}`, `indices/{builder,divergence}`, `backtest/*` — raise ngay khi import | 🔴 6 module |
 | `serving/api.py` ★ | không có FastAPI ở đâu trong repo | 🔴 **thiếu thật** |
 | `params/` ★ | không có | 🔴 **thiếu thật, ưu tiên 1** |
-| `econometrics/measurement_error.py` ★ | không có | 🔴 thiếu thật (nhưng xuống robustness — `docs/17` §3.1) |
+| `econometrics/measurement_error.py` ★ | không có | 🔴 thiếu thật (nhưng xuống robustness — `docs/10_master_plan.md` §3.1) |
 | `scoring/tier_a.py` ★ | không có (tầng A replication chưa làm) | 🔴 thiếu thật |
 | `scoring/audit.py` ★ | không có | 🔴 thiếu thật |
 | `indices/aggregate.py` ★ | không có (mẫu số chung $A_t$) | 🔴 thiếu thật |
@@ -168,11 +169,11 @@ def enforce(narrative: str, payload: dict) -> str:
 | 1 | ~~`load_ai_gpr()` + 5 subindices + vintage~~ | — | ✅ **đã xong**, gạch |
 | 2 | ~~`decompose()`~~ | — | ✅ **đã xong** (`delta_decomposition`) |
 | 3 | Hiệu chuẩn phân vị/JUMP trên AI-GPR, **có xử lý zero-inflation** (`GPR_OIL` = 0 ở 31.8% ngày, theo vùng tới 99.7%) | `econometrics/shocks.py` | giữ, thêm ràng buộc |
-| 3b | **Chạy lại E2 trên AI-GPR** | `scripts/run_e2_component_check.py` | **thêm mới** — quyết định cách đọc spec kép, xem `docs/17` §A4 |
+| 3b | **Chạy lại E2 trên AI-GPR** | `scripts/run_e2_component_check.py` | **thêm mới** — quyết định cách đọc spec kép, xem `docs/10_master_plan.md` §A4 |
 | 4 | Panel đổi được **nguồn shock** (GPR gốc ↔ AI-GPR) | `econometrics/data_files.py` | **thêm mới** — hiện hard-code file xls, không có tham số |
 | 5 | tier2 trả **đủ hệ số** của spec đa regressor (`return_all=True` xuyên qua, `supt_c` riêng từng hệ số) | `econometrics/tier2_global_macro.py` | **thêm mới** — hiện chỉ trả hệ số của một `shock`, regressor thứ hai rơi vào `controls` và **bị vứt** |
 | 6 | Cột ANTICIPATED/SURPRISE vào panel | `econometrics/data_files.py` | **thêm mới** — `components=True` hiện là act/threat, không phải cặp phân rã |
-| 7 | IV / common factor | `econometrics/measurement_error.py` ★ | **xuống robustness** (`docs/17` §3.1: corr monthly 0.853, không phải 0.69) |
+| 7 | IV / common factor | `econometrics/measurement_error.py` ★ | **xuống robustness** (`docs/10_master_plan.md` §3.1: corr monthly 0.853, không phải 0.69) |
 | 8 | `run_t2_full.py` chạy 3 bản → bảng γ | `scripts/` | giữ |
 | 9 | cascade tier3 nước pilot, nhãn PLUMBING | `scripts/run_tier3.py` | ⛔ **chốt nguồn WIG/IPSA trước** — `pilot_market_series_missing`, không có trên FRED |
 | 10 | `ParamsArtifact` + `publish_params.py` | `params/` ★ | giữ — **hạng mục giá trị nhất của doc này** |
@@ -201,7 +202,7 @@ def enforce(narrative: str, payload: dict) -> str:
 | 21 | `compose.py` | ✅ đã có (`reporting/composer.py`) |
 | 22 | **FastAPI** + Kafka + workers | Kafka đã có; **FastAPI là lỗ hổng thật, chưa có dòng nào** |
 | 23 | `track_record/scoring.py` (CRPS/Brier) | 🔴 thiếu thật |
-| 24 | VNINDEX → tier3 VN → `artifact.tier3["VN"]` | ⛔ VNINDEX **không phải blocker duy nhất**: country/bilateral là monthly (#10 cấm ffill) → track VN daily vẫn chặn. Xem `docs/17` §A2 |
+| 24 | VNINDEX → tier3 VN → `artifact.tier3["VN"]` | ⛔ VNINDEX **không phải blocker duy nhất**: country/bilateral là monthly (#10 cấm ffill) → track VN daily vẫn chặn. Xem `docs/10_master_plan.md` §A2 |
 
 ---
 
@@ -257,7 +258,7 @@ Ba test cuối là các quyết định của §1/§3 viết thành code. Test `
 3. tier2 return_all + cột ANTICIPATED/SURPRISE vào panel  — điều kiện để chạy 1a
 ```
 
-⚠️ **Sửa khẳng định của v1.0** ("bốn việc này không phụ thuộc quyết định nào đang treo"): việc "tier2 thêm chiều component" **có** phụ thuộc `docs/17` §7 #2 — chốt ô chính `SCA-01.primary_cell.shock` bằng spec kép là chốt **bằng thiết kế** chứ không bằng E1c-exo, và `DEC-2026-08-03-dual-component` ghi rõ đó là quyết định RIÊNG cần chữ ký mới. Code cứ viết được (nó chỉ thêm chiều báo cáo), nhưng **gắn nhãn ô nào là ô chính thì không** — làm trước là lặp lại đúng thứ mà cơ chế UNRESOLVED sinh ra để chặn.
+⚠️ **Sửa khẳng định của v1.0** ("bốn việc này không phụ thuộc quyết định nào đang treo"): việc "tier2 thêm chiều component" **có** phụ thuộc `docs/10_master_plan.md` §7 #2 — chốt ô chính `SCA-01.primary_cell.shock` bằng spec kép là chốt **bằng thiết kế** chứ không bằng E1c-exo, và `DEC-2026-08-03-dual-component` ghi rõ đó là quyết định RIÊNG cần chữ ký mới. Code cứ viết được (nó chỉ thêm chiều báo cáo), nhưng **gắn nhãn ô nào là ô chính thì không** — làm trước là lặp lại đúng thứ mà cơ chế UNRESOLVED sinh ra để chặn.
 
 ---
 
