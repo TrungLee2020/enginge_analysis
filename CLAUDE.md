@@ -82,6 +82,16 @@ User tự chạy `docker compose up postgres` + `scripts/test_llm_and_db.py` v�
 
 386 test pass.
 
+### 📐 E4 — AI-GPR độc quyền có gì + đối chiếu PHƯƠNG PHÁP trong paper
+
+`docs/reports/E4_aigpr_unique_13b8e8_a429b2.md` (`scripts/run_e4_aigpr_unique.py`, trần claim `measurement`). Trả lời tiếp câu của user: AI-GPR là dữ liệu kèm paper nên cập nhật chậm hơn GPRD — vậy dùng nó vào đâu cho khỏi phí?
+
+- **Nguyên tắc rút ra, có số liệu chống lưng: phân công theo TỐC ĐỘ BIẾN ĐỔI, không theo nguồn.** Tự tương quan theo tháng: đại lượng cấu trúc (`AIGPR_OIL/AIGPR`) **0.757**, còn trigger (JUMP) **−0.054**. Tức trễ vài tuần phá hỏng một trigger nhưng gần như không suy giảm một đại lượng cấu trúc → **nhịp chậm của AI-GPR KHÔNG phải nhược điểm cho đúng nhóm việc nó độc quyền** (kênh năng lượng, bilateral, vai trò nước).
+- **8 vùng oil daily là thứ GPRD hoàn toàn không có** (GPRD chỉ 3 cột). Tương quan trung bình giữa các cặp vùng chỉ **0.132** → mang thông tin riêng, không phải bản sao có tỷ lệ của chuỗi tổng.
+- **⛔ Tự đính chính một cách đọc SAI của chính tôi:** `AIGPR_OIL` KHÔNG phải "phần năng lượng của AIGPR" — 41.1% số ngày nó LỚN HƠN chuỗi tổng, và OIL+NONOIL không cộng về AIGPR. Xác nhận kép: công thức (2) trong paper **không có hằng số chuẩn hóa `S̄`** trong khi công thức (1) thì có. Nên `AIGPR_OIL/AIGPR` là **tỷ số cường độ tương đối**, KHÔNG phải tỷ trọng phần trăm — ai cộng các vùng lại rồi thắc mắc "sao vượt 100%" là do đọc nhầm chỗ này.
+- **Đối chiếu paper: mấy nghi ngại hiển nhiên ĐÃ được tác giả đo, không phải lỗ hổng bỏ ngỏ** — lọc từ khóa giai đoạn 1 có tỷ lệ bỏ sót **0.9%** (đo bằng cách chấm LLM trên mẫu bài không khớp từ khóa), cắt 2.000 ký tự đã kiểm bằng chấm lại toàn văn. Rủi ro thật còn lại: Oil GPR có điều kiện lồng (chỉ xét bài GPR>0.5 + từ khóa dầu) nên **không độc lập** với chuỗi tổng; phụ thuộc GPT-4o mini; chỉ 3 tờ báo (GPRD 10–11).
+- **Ranh giới với chân B — KHÔNG được để lẫn:** AI-GPR đo *tỷ lệ đưa tin về rủi ro* (0..1, một chiều, `ΣSᵢ/Aₜ`); chân B đo *mức leo thang của MỘT phát ngôn* (−1..+1, hai chiều, có `w(role)`). Chiều hòa giải và trọng số vai người nói là hai thứ AI-GPR **không có** — đúng phần giá trị tự xây theo #2. Kéo chân B về phía chấm bài báo một chiều = đánh mất khác biệt, không phải nâng cấp.
+
 ## Trạng thái trước đó (2026-08-05, vòng 2)
 
 ### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh
