@@ -41,7 +41,22 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-05, vòng 2)
+## Trạng thái hiện tại (cập nhật 2026-08-08)
+
+### 🧪 Test thật đầu tiên qua Docker+Postgres+Gemini — phát hiện + vá prompt bịa số
+
+User tự chạy `docker compose up postgres` + `scripts/test_llm_and_db.py` với Gemini thật (qua `OPENAI_BASE_URL` trỏ endpoint tương thích OpenAI của Gemini) — lần đầu tiên pipeline chạm dữ liệu thật ngoài test mock. Diễn biến:
+
+- **2 file `.xls` gốc (GPRD/GPRC) đã được thêm trực tiếp vào `main`** (không qua nhánh này) — `data/data_gpr_daily_recent.xls` + `data/data_gpr_export_202607.xls`, cùng với **1 bug thật đã được vá** (không phải bởi Claude, bởi commit `5861fa0` "update"): `reporting/guard.py` — quy tắc miễn trừ backtick cũ chỉ khớp hash hex trần, không khớp TÊN FILE γ (`t2_full_holm_f2579b30928f.csv`) mà `news_pipeline` truyền làm `data_version` → Guard P1 chặn NHẦM mọi tin trên đường serving thật. Đã sửa regex `_STRIP` + thêm test khóa lại. `.gitignore` cũng được đổi (comment out `data/*.xls|*.csv`) — quyết định của user, cho phép commit data files (khác thiết kế "operator-supplied, gitignored" ban đầu).
+- **Lỗi vận hành thật gặp phải + đã ghi lại**: `docker-compose.yml` cổng 5432 bị Postgres native trên WSL/Linux chiếm — lỗi hiện ra là "password authentication failed" (trông như sai mật khẩu, thực ra là container bị che). Đã thêm `GPR_POSTGRES_HOST_PORT` (mặc định 5432, đổi được qua `.env`) để né.
+- **`scripts/test_llm_and_db.py` vá 3 vòng liên tiếp theo log thật của user** (mỗi vòng lộ ra 1 gap thật trong chính script chẩn đoán, không phải trong pipeline):
+  1. Thiếu in `measurement_card_error` — không phân biệt được "suy giảm có kiểm soát, đã biết lý do" với "trông giống lỗi".
+  2. Điều kiện in lý do chỉ xét khi `ladder_computed=False`, bỏ sót trường hợp `ladder_computed=True` nhưng `measurement_card=None` (Guard P1 chặn RIÊNG bước compose card, xảy ra SAU khi ladder đã tính xong).
+  3. `DEFAULT_TEXT` không nêu tên nước nào → LLM trả `actor_country=null`, `pair_identified=False`, S-GPR/Ladder bị bỏ qua ĐÚNG THIẾT KẾ nhưng không có `measurement_card_error` giải thích (nhánh đó nằm ngoài try/except sinh lỗi) — sửa câu mẫu + in thêm `pair_identified`.
+- **✅ Phát hiện thật, đã vá tận gốc: Guard P1 chặn liên tục vì Gemini tự bịa số trong `rationale`** (vd "risk escalated by roughly 42%" — số không có trong tin gốc lẫn payload). Đây ĐÚNG là loại lỗi Guard P1 sinh ra để chặn (tiền lệ có thật: report cũ từng ghi "1.8×" trong khi payload là 2.77×) — không phải bug, guard hoạt động đúng. Nhưng thay vì chỉ dựa vào lưới an toàn cuối, đã sửa NGUỒN: thêm rule `rationale QUALITATIVE ONLY, never invent numbers` vào `SYSTEM_PROMPT` + `docs/00 §2.4` (doc trước, code sau — đúng quy ước), **bump `PROMPT_VERSION: p1 → p2`** (đổi prompt = đổi `content_hash`, đúng ý nghĩa versioning #4). Guard P1 giữ nguyên nghiêm ngặt — đây là giảm tần suất bị chặn, không phải nới lỏng.
+- 353 test pass (334 cũ ở vòng trước → giờ 353, gồm cả test trước đó luôn fail vì thiếu `.xls` — giờ pass vì file đã có).
+
+## Trạng thái trước đó (2026-08-05, vòng 2)
 
 ### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh
 

@@ -43,7 +43,13 @@ from typing import Any
 import pandas as pd
 
 RUBRIC_VERSION = "r1"      # bang neo docs/00 §2.3 — doi bang neo thi bump
-PROMPT_VERSION = "p1"      # docs/00 §2.4 + quy tac contamination docs/14 §3.1.1
+PROMPT_VERSION = "p2"      # docs/00 §2.4 + quy tac contamination docs/14 §3.1.1
+# p1->p2 (2026-08-08): them rule "rationale QUALITATIVE ONLY, khong bia so" —
+# Guard P1 (reporting/guard.py) chan lien tuc cac model (vd Gemini) tu bia so
+# vao rationale ("risk escalated by roughly 42%" khi 42 khong co trong tin
+# goc). Fix o NGUON (prompt), Guard P1 van giu nguyen lam luoi an toan cuoi —
+# doi prompt = doi noi dung cache theo content_hash (dung, tin cham lai voi
+# prompt moi la mot lan cham khac).
 DEFAULT_TEMPERATURE = 0.1  # ECB LGPT (docs/11 §7): giam phuong sai, tai lap duoc
 DEFAULT_ENCODER_THRESHOLD = 0.6
 
@@ -100,11 +106,14 @@ Rules:
 - A specific threat with conditions/deadlines scores higher than vague bluster.
 - Reporting/quoting another party's threat is NOT the speaker escalating.
 - Historical commemoration, condolences, culture/sports -> v = 0.
+- rationale is QUALITATIVE ONLY: never invent numbers, percentages, or
+  statistics that are not present in the input text -- describe WHY in
+  words, not WITH figures.
 Return strict JSON, exactly these keys and nothing else:
 {{"v": float, "actor_country": ISO3|null, "target_country": ISO3|null,
  "channel": "trade|military|sanction|diplomacy|energy|tech"|null,
  "commitment": "rhetoric|conditional|announced_action",
- "specificity": float, "rationale": "<= 25 words"}}"""
+ "specificity": float, "rationale": "<= 25 words, qualitative only, no numbers"}}"""
 
 
 class ScoreParseError(ValueError):

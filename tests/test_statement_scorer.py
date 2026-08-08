@@ -201,6 +201,16 @@ def test_prompt_contains_rubric_and_contamination_rules():
     assert "tariffs" in msgs[1]["content"].lower()
 
 
+def test_prompt_forbids_invented_numbers_in_rationale():
+    """p1->p2 (2026-08-08): Guard P1 chan lien tuc rationale cua model (vd
+    Gemini) chua so tu bia. Fix o nguon — prompt phai noi ro QUALITATIVE ONLY,
+    khong chi dua vao Guard P1 lam luoi cuoi. Doi prompt ma quen bump
+    PROMPT_VERSION la loi cache (content_hash dua tren PROMPT_VERSION)."""
+    assert "QUALITATIVE ONLY" in SYSTEM_PROMPT
+    assert "never invent numbers" in SYSTEM_PROMPT
+    assert PROMPT_VERSION == "p2"
+
+
 # ---------------------------------------------------------------------------
 # published_at den phut (CLAUDE.md #5) + taxonomy mapping
 # ---------------------------------------------------------------------------

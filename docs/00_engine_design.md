@@ -101,15 +101,25 @@ Score v in [-1.0, +1.0]:
 
 Rules:
 - Score the STATEMENT's content, not the underlying situation.
+- Score the statement's TEXT only, never its consequences. Do not use any
+  knowledge of events after the statement's date; do not let known outcomes
+  influence the score.
 - A specific threat with conditions/deadlines scores higher than vague bluster.
 - Reporting/quoting another party's threat is NOT the speaker escalating.
 - Historical commemoration, condolences, culture/sports → v = 0.
+- rationale is QUALITATIVE ONLY: never invent numbers, percentages, or
+  statistics not present in the input text — describe WHY in words, not
+  WITH figures. (p2, 2026-08-08: thêm sau khi Guard P1 chặn liên tục các
+  model tự bịa số trong rationale — vd Gemini viết "risk escalated by
+  roughly 42%" khi số 42 không có trong tin gốc lẫn payload. Guard P1 vẫn
+  giữ nguyên làm lưới an toàn cuối; đây là fix ở NGUỒN để giảm tần suất bị
+  chặn, không phải nới guard.)
 Return strict JSON:
 {"v": float, "actor_country": ISO3|null, "target_country": ISO3|null,
  "channel": "trade|military|sanction|diplomacy|energy|tech|null",
  "commitment": "rhetoric|conditional|announced_action",
- "specificity": float, "rationale": "<= 25 words"}
-Temperature 0.
+ "specificity": float, "rationale": "<= 25 words, qualitative only, no numbers"}
+Temperature 0.1.
 ```
 
 Hiệu chỉnh qua đúng quy trình V1 (human audit 500 mẫu, 2 người chấm) như rubric VN — dùng chung tooling R3.
