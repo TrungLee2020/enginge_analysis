@@ -1,6 +1,6 @@
-"""Kiem tra cac SO LIEU ma master plan (docs/10_master_plan.md) trich dan, tren file THAT.
+"""Kiem tra cac SO LIEU ma master plan (docs/17_master_plan.md) trich dan, tren file THAT.
 
-Guard P1 tinh than: khong go tay so vao doc. Moi con so trong docs/10_master_plan.md §A
+Guard P1 tinh than: khong go tay so vao doc. Moi con so trong docs/17_master_plan.md §A
 (phu luc kiem chung) phai in ra tu script nay.
 
 Chay:
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# Layout file trong repo khong khop DEFAULT_* cua data_files.py (xem docs/10_master_plan.md §C5).
+# Layout file trong repo khong khop DEFAULT_* cua data_files.py (xem docs/17_master_plan.md §C5).
 # Script nay do tim ca hai layout de chay duoc o ca hai truong hop.
 CANDIDATES = {
     "ai_daily": ["data/ai_gpr_data_daily.csv", "data/AI-GPRs/ai_gpr_data_daily.csv"],
