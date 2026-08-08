@@ -69,6 +69,19 @@ User tự chạy `docker compose up postgres` + `scripts/test_llm_and_db.py` v�
 
 380 test pass.
 
+### 🔬 E3 — đo AI-GPR vs GPRD làm nguồn JUMP: 2 giả định bị bác, 1 rào cản thật lộ ra
+
+`docs/reports/E3_aigpr_jump_8cc9bf_13b8e8.md` (`scripts/run_e3_aigpr_jump.py`, trần claim `measurement`). Chạy cả hai chuỗi qua ĐÚNG đường production (`jump()` window=250/q=0.95 → `expanding_percentile` → ngưỡng S4 `jump_pct>95`) trên mẫu chung 1985–2026, 15155 ngày.
+
+- **⛔ Bác giả định của `docs/16` §5 "phải hiệu chuẩn lại q95/q99".** `jump()` dựng trên z-score rolling rồi trừ phân vị của chính z — **bất biến theo thang đo**, nên khác biệt mức/đuôi bị chuẩn hóa đi trước khi ngưỡng áp. Đo được: GPRD kích **5.24%** ngày, AI-GPR **5.14%**, ổn định qua cả 3 giai đoạn. Ngưỡng giữ nguyên được. Đã đính chính `docs/16` §5 (giữ cảnh báo cho chỗ đọc mức thô).
+- **⛔ Bác luôn kết luận trung gian của chính phiên này** ("AI-GPR trượt Crimea 2014"): sai do tôi đặt cửa sổ MỘT PHÍA [D, D+3] — AI-GPR kích *trước* ngày sáp nhập (quanh trưng cầu dân ý). Cửa sổ đối xứng [D−3, D+3]: **cả hai 8/8** sự kiện lớn.
+- **⚠️ Rào cản THẬT (mới): cùng tần suất KHÔNG phải cùng ngày.** Jaccard chỉ **0.203** (cửa sổ 2015–2023: 0.189) — bốn phần năm số ngày kích của chuỗi này thì chuỗi kia im. Đổi nguồn JUMP **là đổi thước đo**. Phương án "dùng cả hai" (hợp) đẩy tần suất S4 lên **8.64%**, gần gấp đôi — đổi spec, không phải nâng cấp miễn phí.
+- **Lợi ích vận hành đo được: AI-GPR mới hơn GPRD 32 ngày** (2026-07-31 vs 2026-06-29) — đúng nguyên nhân cờ `chain_a_stale` bật ở lần chạy thật 2026-08-08.
+- **Việc code (giữ hành vi mặc định KHÔNG đổi):** gỡ hard-code `series_id='GPRD'` trong `store.load_jump_series` → tham số `series_id` (mặc định vẫn `GPRD`) + `fallback_series_id` (mặc định `None` = tắt). Chuỗi thực dùng ghi vào `Series.attrs["series_id"]` và **nêu thẳng trong `sample_caveat`** khi khác mặc định — vì Jaccard thấp, một S4 từ AI-GPR không so trực tiếp được với S4 từ GPRD. **KHÔNG đổi mặc định, KHÔNG dùng hợp/giao** cho tới khi có gold set (KĐ-E1c vẫn bị chặn bởi `data_blockers.gold_events_csv`).
+- Guard P1 bắt được chính tôi khi viết caveat: gõ số `0.203` vào văn xuôi → chặn đúng, đã đổi thành trỏ tới report thay vì chép số.
+
+386 test pass.
+
 ## Trạng thái trước đó (2026-08-05, vòng 2)
 
 ### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh

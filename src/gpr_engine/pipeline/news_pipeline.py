@@ -72,6 +72,10 @@ MACRO_OUTCOMES = {"oil", "dxy", "vix", "us10y", "ip", "cpi", "infl_exp", "freigh
 # dong). 35 ngay = ~1 chu ky thang + dem — CHINH LAI cho khop cadence THAT ban
 # quan sat duoc sau khi van hanh, dung dung so nay lam chan ly.
 DEFAULT_CHAIN_A_STALE_AFTER_DAYS = 35
+# Ten chuoi chan A mac dinh — trung `service.store.CHAIN_A_SERIES_DEFAULT`.
+# Khai bao lai o day (chu khong import) de `process_news_item` giu duoc tinh
+# THUAN: no khong biet gi ve Postgres, chi doc nhan ma provider gan vao attrs.
+DEFAULT_CHAIN_A_SERIES = "GPRD"
 
 # Callable tiem vao — production doc that tu Postgres/file, test dung fake.
 HistoryProvider = Callable[[str], pd.DataFrame]           # pair -> lich su statement_scores
@@ -248,10 +252,24 @@ def process_news_item(
                      "energy/trade/financial/military — dùng proxy "
                      "commitment→channel(pooled/act/threat), xem "
                      "pipeline/gamma_lookup.py")
+    # Chuoi chan A THAT SU dung (store.load_jump_series gan vao attrs) — co the
+    # KHAC mac dinh neu caller bat fallback. E3 do duoc GPRD/AI-GPR chi trung
+    # ~1/5 so ngay kich S4 du cung tan suat, nen KHONG duoc de nguoi doc tu suy
+    # ra chuoi nao: neu khong phai mac dinh thi noi thang trong caveat.
+    chain_a_series = jump_series.attrs.get("series_id", DEFAULT_CHAIN_A_SERIES)
+    if chain_a_series != DEFAULT_CHAIN_A_SERIES:
+        # KHONG gõ số Jaccard vào đây: Guard P1 chặn đúng (số không có trong
+        # payload), và đó là quy tắc đúng — con số thuộc về report E3, không
+        # phải lặp lại trong mọi brief. Trỏ tới report thay vì chép số.
+        sample_caveat += (f" · ⚠️ JUMP/Ladder tin này tính trên `{chain_a_series}`, "
+                          f"KHÔNG phải `{DEFAULT_CHAIN_A_SERIES}` mặc định — hai "
+                          "chuỗi cùng tần suất kích S4 nhưng phần lớn khác NGÀY "
+                          "(xem docs/reports/E3_aigpr_jump_*.md), không so trực "
+                          "tiếp với tin dùng chuỗi mặc định.")
     if chain_a_stale:
         last_str = (chain_a_last_available.date().isoformat()
                    if chain_a_last_available is not None else "chưa có dữ liệu")
-        sample_caveat += (f" · ⚠️ chain A (GPRD) mới nhất {last_str}, quá "
+        sample_caveat += (f" · ⚠️ chain A ({chain_a_series}) mới nhất {last_str}, quá "
                           f"{chain_a_stale_after_days} ngày so với tin này — "
                           "JUMP/Ladder S4 có thể im lặng vì THIẾU dữ liệu, "
                           "không phải vì thật sự yên ắng.")
@@ -362,6 +380,8 @@ def process_news_item_live(
     ladder_config_path: str = str(DEFAULT_LADDER_CONFIG),
     chain_a_stale_after_days: int = DEFAULT_CHAIN_A_STALE_AFTER_DAYS,
     engine: Engine | None = None,
+    chain_a_series: str = DEFAULT_CHAIN_A_SERIES,
+    chain_a_fallback_series: str | None = None,
 ) -> NewsAssessment | ExcludedResult:
     """Wrapper production: noi Postgres + file gamma that vao `process_news_item`.
 
@@ -390,7 +410,13 @@ def process_news_item_live(
         return store.load_pair_history(engine, pair, before=_as_utc(stmt.published_at))
 
     def jump_series_provider(as_of: pd.Timestamp) -> pd.Series:
-        return store.load_jump_series(engine, as_of)
+        # `chain_a_fallback_series=None` (mac dinh) -> hanh vi y het ban cu.
+        # Dat 'AIGPR' de doc AI-GPR khi GPRD qua cu — xem E3 §6 khuyen nghi 3;
+        # chuoi that su dung se duoc neu trong sample_caveat cua Model Brief.
+        return store.load_jump_series(
+            engine, as_of, series_id=chain_a_series,
+            fallback_series_id=chain_a_fallback_series,
+            fallback_after_days=chain_a_stale_after_days)
 
     def gamma_loader(channel: str):
         return load_published_gamma(channel, outcomes=MACRO_OUTCOMES,

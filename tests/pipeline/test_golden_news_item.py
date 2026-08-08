@@ -323,19 +323,35 @@ def test_no_country_means_no_pair_index_but_still_emits_brief():
 # ---------------------------------------------------------------------------
 # 8. Chain A: AI-GPR ĐÃ ingest nhưng KHÔNG được dùng ở đường serving
 # ---------------------------------------------------------------------------
-def test_chain_a_reads_GPRD_only_not_AIGPR():
-    """⚠️ PHÁT HIỆN 2026-08-08: `service/store.py::load_jump_series` truy vấn
-    CỨNG `series_id = 'GPRD'`. AI-GPR (AIGPR/AIGPR_ACT/AIGPR_THREAT + 8 vùng
-    oil) đã có đường ingest (`ingest/ai_gpr.py`) và đã nạp được vào ext_series,
-    nhưng KHÔNG chuỗi nào trong số đó chạm vào đường "1 tin -> 1 kết quả".
+def test_chain_a_defaults_to_GPRD_unchanged():
+    """Mặc định VẪN là GPRD sau khi tham số hóa (E3 §6 khuyến nghị 1).
 
-    Đây KHÔNG phải bug — chưa ai quyết định AI-GPR thay hay bổ sung GPRD cho
-    JUMP (đổi là đổi thước đo shock, phải hiệu chuẩn lại ngưỡng q95/q99 vì
-    AI-GPR mượt hơn và không có ngày bằng 0 — docs/16 §5). Test này ghim hiện
-    trạng để việc nối AI-GPR vào (nếu làm) là quyết định CÓ CHỦ ĐÍCH, không
-    phải thay đổi âm thầm.
+    Trước 2026-08-08 `store.load_jump_series` hard-code `series_id='GPRD'`;
+    giờ là tham số. Đổi MẶC ĐỊNH là đổi thước đo shock — E3 đo được GPRD và
+    AI-GPR chỉ trùng ~1/5 số ngày kích S4 dù cùng tần suất — nên phải qua
+    governance, không phải đổi ngầm. Test khóa đúng điều đó.
     """
-    from pathlib import Path
-    src = Path("src/gpr_engine/service/store.py").read_text(encoding="utf-8")
-    assert "series_id = 'GPRD'" in src
-    assert "AIGPR" not in src
+    from gpr_engine.pipeline.news_pipeline import DEFAULT_CHAIN_A_SERIES
+    from gpr_engine.service import store
+    assert store.CHAIN_A_SERIES_DEFAULT == "GPRD"
+    assert DEFAULT_CHAIN_A_SERIES == "GPRD"
+
+
+def test_caveat_names_chain_a_series_when_not_default():
+    """Dùng chuỗi khác mặc định -> Model Brief PHẢI nói ra.
+
+    Vì hai chuỗi kích S4 ở những NGÀY khác nhau (Jaccard 0.203), một S4 từ
+    AI-GPR không so trực tiếp được với S4 từ GPRD. Im lặng ở đây là để người
+    đọc tưởng nhầm hai con số cùng thước đo.
+    """
+    def _aigpr_provider(as_of):
+        s = _fresh_chain_a(as_of)
+        s.attrs["series_id"] = "AIGPR"
+        return s
+
+    brief = _run(jump_provider=_aigpr_provider).macro_brief
+    assert "AIGPR" in brief
+    assert "E3_aigpr_jump" in brief    # trỏ report thay vì chép số (Guard P1)
+
+    # Chuỗi mặc định thì KHÔNG thêm cảnh báo thừa
+    assert "KHÔNG phải" not in _run(jump_provider=_fresh_chain_a).macro_brief

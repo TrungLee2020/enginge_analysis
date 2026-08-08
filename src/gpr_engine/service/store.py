@@ -24,6 +24,19 @@ if TYPE_CHECKING:
 JUMP_HISTORY_DAYS = 1095       # ~3 nam — du dem cho rolling window=250 cua jump()
 JUMP_MIN_PERIODS = None        # None -> shocks.jump tu chon max(20, window//4)
 
+# Chuoi chan A mac dinh cho JUMP. Truoc 2026-08-08 gia tri nay hard-code trong
+# SQL cua load_jump_series; tach ra hang so + tham so de thu chuoi khac (vd
+# 'AIGPR' da ingest qua ingest/ai_gpr.py) khong phai sua ma nguon. Mac dinh
+# GIU NGUYEN 'GPRD' — doi mac dinh la doi thuoc do shock, phai qua governance
+# (xem docs/reports/E3_aigpr_jump_*.md §6 khuyen nghi 1).
+CHAIN_A_SERIES_DEFAULT = "GPRD"
+CHAIN_A_SERIES_AIGPR = "AIGPR"
+# Nguong coi chuoi chinh la "qua cu de dung" khi CO khai bao fallback. Bang
+# DEFAULT_CHAIN_A_STALE_AFTER_DAYS cua news_pipeline (35) de mot tin bi gan co
+# `chain_a_stale` va mot tin kich fallback la CUNG mot moc — hai nguong lech
+# nhau se tao vung xam: da fallback nhung van bao stale, hoac nguoc lai.
+CHAIN_A_FALLBACK_AFTER_DAYS = 35
+
 
 def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
     """Chuan hoa ve tz-aware UTC truoc khi ghi TIMESTAMPTZ — cung ly do voi
@@ -80,8 +93,9 @@ def load_pair_history(engine: "Engine", pair: str, before: pd.Timestamp) -> pd.D
     return df
 
 
-def load_jump_series(engine: "Engine", as_of: pd.Timestamp) -> pd.Series:
-    """Chuoi JUMP THO (chan A, GPRD daily) tinh den `as_of` — point-in-time (#11).
+def _load_raw_chain_a(engine: "Engine", as_of: pd.Timestamp,
+                      series_id: str) -> pd.Series:
+    """Chuoi THO chan A (chua tinh JUMP) cua MOT series_id, point-in-time (#11).
 
     Chi dung hang co `available_at <= as_of` — dung `date` lam proxy la
     look-ahead bias (CLAUDE.md #11, khop `ingest/gpr_daily.py`).
@@ -96,24 +110,76 @@ def load_jump_series(engine: "Engine", as_of: pd.Timestamp) -> pd.Series:
     """
     from sqlalchemy import text
 
-    from ..econometrics.shocks import jump as compute_jump
-
     start = (as_of - pd.Timedelta(days=JUMP_HISTORY_DAYS)).date()
     sql = text("""
         SELECT date, value FROM (
             SELECT DISTINCT ON (date) date, value
             FROM ext_series
-            WHERE series_id = 'GPRD' AND date >= :start AND available_at <= :as_of
+            WHERE series_id = :series_id AND date >= :start
+              AND available_at <= :as_of
             ORDER BY date, loaded_at DESC
         ) latest
         ORDER BY date
     """)
     with engine.connect() as conn:
-        df = pd.read_sql(sql, conn, params={"start": start, "as_of": as_of.to_pydatetime()})
+        df = pd.read_sql(sql, conn, params={"series_id": series_id, "start": start,
+                                            "as_of": as_of.to_pydatetime()})
     if df.empty:
         return pd.Series(dtype=float)
-    s = pd.Series(df["value"].to_numpy(), index=pd.to_datetime(df["date"], utc=True))
-    return compute_jump(s, min_periods=JUMP_MIN_PERIODS)
+    return pd.Series(df["value"].to_numpy(),
+                     index=pd.to_datetime(df["date"], utc=True))
+
+
+def load_jump_series(
+    engine: "Engine",
+    as_of: pd.Timestamp,
+    series_id: str = CHAIN_A_SERIES_DEFAULT,
+    fallback_series_id: str | None = None,
+    fallback_after_days: int = CHAIN_A_FALLBACK_AFTER_DAYS,
+) -> pd.Series:
+    """Chuoi JUMP chan A tinh den `as_of` — point-in-time (#11).
+
+    `series_id` mac dinh 'GPRD' -> HANH VI KHONG DOI so voi ban truoc khi tham
+    so hoa. Truoc day gia tri nay hard-code trong SQL, muon thu chuoi khac
+    (vd AI-GPR da ingest qua `ingest/ai_gpr.py`) buoc phai sua ma nguon.
+
+    `fallback_series_id`: chuoi du phong, CHI dung khi chuoi chinh rong hoac
+    ban ghi moi nhat cach `as_of` qua `fallback_after_days` ngay. Mac dinh None
+    = KHONG fallback (giu nguyen hanh vi cu: chuoi chinh cu thi tra ve chinh no,
+    caller tu gan co `chain_a_stale`).
+
+    ⚠️ Fallback DOI THUOC DO, khong phai doi cach doc cung mot thuoc do:
+    E3 (`docs/reports/E3_aigpr_jump_*.md`) do duoc GPRD va AI-GPR co CUNG tan
+    suat kich S4 (~5.2%, on dinh qua 3 giai doan — nen KHONG phai hieu chuan
+    lai q95/q99 nhu `docs/16` §5 tung khang dinh), NHUNG chi trung nhau khoang
+    mot phan nam so ngay kich (Jaccard 0.203). Vi vay chuoi da dung duoc ghi
+    vao `Series.attrs["series_id"]` — caller PHAI neu ro trong output thay vi
+    de nguoi doc tuong mot ngay S4 luon den tu cung mot thuoc do.
+    """
+    from ..econometrics.shocks import jump as compute_jump
+
+    used = series_id
+    s = _load_raw_chain_a(engine, as_of, series_id)
+    if fallback_series_id is not None:
+        last = s.index.max() if len(s) else None
+        stale = last is None or (as_of - last).days > fallback_after_days
+        if stale:
+            alt = _load_raw_chain_a(engine, as_of, fallback_series_id)
+            alt_last = alt.index.max() if len(alt) else None
+            # Chi doi khi chuoi du phong THAT SU moi hon — fallback sang mot
+            # chuoi cung cu (hoac cung rong) chi lam mat dau vet nguon goc.
+            if alt_last is not None and (last is None or alt_last > last):
+                s, used = alt, fallback_series_id
+    if s.empty:
+        out = pd.Series(dtype=float)
+        out.attrs["series_id"] = used
+        return out
+    out = compute_jump(s, min_periods=JUMP_MIN_PERIODS)
+    # `attrs` KHONG tu dong truyen qua compute_jump (pandas chi giu attrs o mot
+    # so phep toan) — gan lai TAI DAY, sau khi tinh. Quen dong nay thi caller
+    # doc attrs se thay rong va tuong dang dung chuoi mac dinh.
+    out.attrs["series_id"] = used
+    return out
 
 
 def insert_statement(engine: "Engine", stmt: "Statement") -> int:

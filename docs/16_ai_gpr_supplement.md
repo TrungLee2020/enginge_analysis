@@ -205,7 +205,8 @@ Llama 3.1 8B Instruct tương quan **0.91** với GPT-4o mini (cao hơn cả GPT
 **Mượt hơn, dai hơn, đuôi phải mỏng hơn, không có ngày nào bằng 0.**
 
 Hệ quả cho code hiện có:
-- **`JUMP` phải hiệu chuẩn lại.** Ngưỡng q95/q99 rolling trên chuỗi đuôi mỏng hơn sẽ cho phân phối JUMP khác hẳn. Toàn bộ thiết kế trigger theo đuôi (docs/14, docs/15) cần chạy lại phân vị.
+- ~~**`JUMP` phải hiệu chuẩn lại.** Ngưỡng q95/q99 rolling trên chuỗi đuôi mỏng hơn sẽ cho phân phối JUMP khác hẳn.~~ — **⛔ ĐÍNH CHÍNH 2026-08-08, đo trên dữ liệu thật: SAI cho JUMP.** `shocks.jump()` dựng trên **z-score rolling** rồi trừ **phân vị q của chính z** — cả hai bước **bất biến theo thang đo**, nên mức/độ lệch chuẩn/đuôi bị chuẩn hóa đi TRƯỚC khi ngưỡng được áp. Đo bằng đúng tham số production (window=250, q=0.95, ngưỡng S4 `jump_pct>95`) trên mẫu chung 1985–2026: GPRD kích **5.24%** số ngày, AI-GPR **5.14%** — và ổn định qua cả ba giai đoạn 1986–1999 / 2000–2014 / 2015–2026. **Ngưỡng giữ nguyên được.** Cảnh báo gốc vẫn ĐÚNG cho bất kỳ chỗ nào đọc **mức thô** (ngưỡng cố định trên level, so sánh biên độ) — chỉ sai khi áp cho JUMP. Báo cáo đầy đủ: `docs/reports/E3_aigpr_jump_*.md`.
+- **⚠️ Nhưng cùng tần suất KHÔNG phải cùng ngày** (phát hiện mới cùng lần đo): hai chuỗi chỉ trùng nhau khoảng **một phần năm** số ngày kích S4 (Jaccard 0.203; cửa sổ dự án 2015–2023: 0.189). Đổi nguồn JUMP **là đổi thước đo**, không phải đổi cách đọc cùng một thước đo — đây mới là rào cản thật, không phải ngưỡng.
 - **Dai hơn củng cố §2.2:** tự tương quan cao hơn → phần dự báo được lớn hơn → càng không nên vứt nó đi.
 - E1/E1b/E1c chạy trên GPRD, **không tự động chuyển sang AI-GPR**. Thêm `pipeline_note` như đã làm với các report cũ.
 

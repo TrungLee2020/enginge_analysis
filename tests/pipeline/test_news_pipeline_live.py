@@ -98,3 +98,84 @@ def test_injected_engine_reused_across_calls_no_new_pool_per_message(mocked_stor
     process_news_item_live(_stmt(), "postgresql://fake", _llm, CONFIG, engine=fake_engine)
     process_news_item_live(_stmt(), "postgresql://fake", _llm, CONFIG, engine=fake_engine)
     mocked_store["engine"].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Chain A cau hinh duoc + fallback (E3, 2026-08-08)
+# ---------------------------------------------------------------------------
+def _fake_engine_with(series_data: dict[str, pd.DataFrame]):
+    """Engine gia: tra du lieu theo `series_id` trong params cua truy van."""
+    from unittest.mock import MagicMock
+    eng = MagicMock()
+
+    def _read_sql(sql, conn, params=None):
+        return series_data.get(params["series_id"],
+                               pd.DataFrame(columns=["date", "value"]))
+    return eng, _read_sql
+
+
+def _raw(dates, val=100.0):
+    return pd.DataFrame({"date": pd.to_datetime(dates), "value": [val] * len(dates)})
+
+
+def test_load_jump_series_defaults_to_gprd_and_records_it():
+    """Mac dinh KHONG doi hanh vi: doc GPRD, ghi nhan da dung GPRD."""
+    from gpr_engine.service import store
+    eng, reader = _fake_engine_with({"GPRD": _raw(pd.date_range("2026-05-01", periods=90))})
+    with patch("pandas.read_sql", side_effect=reader):
+        s = store.load_jump_series(eng, pd.Timestamp("2026-07-29", tz="UTC"))
+    assert s.attrs["series_id"] == "GPRD"
+    assert len(s) > 0
+
+
+def test_fallback_off_by_default_even_when_primary_is_stale():
+    """Khong khai bao fallback -> chuoi chinh cu van duoc tra ve nguyen (hanh vi cu)."""
+    from gpr_engine.service import store
+    eng, reader = _fake_engine_with({
+        "GPRD": _raw(pd.date_range("2026-01-01", periods=60)),      # dung 2026-03-01, rat cu
+        "AIGPR": _raw(pd.date_range("2026-06-01", periods=60)),     # moi hon nhieu
+    })
+    with patch("pandas.read_sql", side_effect=reader):
+        s = store.load_jump_series(eng, pd.Timestamp("2026-08-08", tz="UTC"))
+    assert s.attrs["series_id"] == "GPRD"       # KHONG tu doi sang AIGPR
+
+
+def test_fallback_used_only_when_primary_stale_and_alt_is_fresher():
+    """Bat fallback + chuoi chinh qua cu -> doc chuoi du phong, GHI RO da doi."""
+    from gpr_engine.service import store
+    eng, reader = _fake_engine_with({
+        "GPRD": _raw(pd.date_range("2026-01-01", periods=60)),
+        "AIGPR": _raw(pd.date_range("2026-06-01", periods=60)),
+    })
+    with patch("pandas.read_sql", side_effect=reader):
+        s = store.load_jump_series(eng, pd.Timestamp("2026-08-08", tz="UTC"),
+                                   fallback_series_id="AIGPR")
+    assert s.attrs["series_id"] == "AIGPR"
+
+
+def test_fallback_not_used_when_primary_is_fresh():
+    """Chuoi chinh con tuoi -> KHONG dung fallback, du da khai bao. Giu nguyen
+    thuoc do khi khong can thiet (E3: hai chuoi kich S4 o nhung ngay khac nhau)."""
+    from gpr_engine.service import store
+    eng, reader = _fake_engine_with({
+        "GPRD": _raw(pd.date_range("2026-06-01", periods=68)),   # den 2026-08-07
+        "AIGPR": _raw(pd.date_range("2026-06-01", periods=68)),
+    })
+    with patch("pandas.read_sql", side_effect=reader):
+        s = store.load_jump_series(eng, pd.Timestamp("2026-08-08", tz="UTC"),
+                                   fallback_series_id="AIGPR")
+    assert s.attrs["series_id"] == "GPRD"
+
+
+def test_fallback_skipped_when_alt_is_not_actually_fresher():
+    """Chuoi du phong cung cu (hoac rong) -> GIU chuoi chinh. Doi sang mot chuoi
+    cung cu chi lam mat dau vet nguon goc ma khong duoc gi."""
+    from gpr_engine.service import store
+    eng, reader = _fake_engine_with({
+        "GPRD": _raw(pd.date_range("2026-01-01", periods=60)),
+        "AIGPR": pd.DataFrame(columns=["date", "value"]),        # rong
+    })
+    with patch("pandas.read_sql", side_effect=reader):
+        s = store.load_jump_series(eng, pd.Timestamp("2026-08-08", tz="UTC"),
+                                   fallback_series_id="AIGPR")
+    assert s.attrs["series_id"] == "GPRD"
