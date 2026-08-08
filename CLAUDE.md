@@ -71,12 +71,12 @@ User tự chạy `docker compose up postgres` + `scripts/test_llm_and_db.py` v�
 
 ### 🔬 E3 — đo AI-GPR vs GPRD làm nguồn JUMP: 2 giả định bị bác, 1 rào cản thật lộ ra
 
-`docs/reports/E3_aigpr_jump_8cc9bf_13b8e8.md` (`scripts/run_e3_aigpr_jump.py`, trần claim `measurement`). Chạy cả hai chuỗi qua ĐÚNG đường production (`jump()` window=250/q=0.95 → `expanding_percentile` → ngưỡng S4 `jump_pct>95`) trên mẫu chung 1985–2026, 15155 ngày.
+`docs/reports/E3_aigpr_jump_*.md` (`scripts/run_e3_aigpr_jump.py`, trần claim `measurement`) — **hai bản: `8cc9bf_13b8e8` (vintage GPR cũ) và `a429b2_13b8e8` (vintage mới 2026-08-08)**. Chạy cả hai chuỗi qua ĐÚNG đường production (`jump()` window=250/q=0.95 → `expanding_percentile` → ngưỡng S4 `jump_pct>95`) trên mẫu chung 1985–2026. **Kết luận §1–§4 KHÔNG đổi giữa hai vintage** (GPRD kích 5.24%→5.23%, AI-GPR 5.14%→5.13%, Jaccard 0.203 y hệt, hợp 8.64%→8.62%, phát hiện sự kiện 8/8 cả hai) — bằng chứng các phát hiện đó bền, không phải artifact của một lần tải.
 
 - **⛔ Bác giả định của `docs/16` §5 "phải hiệu chuẩn lại q95/q99".** `jump()` dựng trên z-score rolling rồi trừ phân vị của chính z — **bất biến theo thang đo**, nên khác biệt mức/đuôi bị chuẩn hóa đi trước khi ngưỡng áp. Đo được: GPRD kích **5.24%** ngày, AI-GPR **5.14%**, ổn định qua cả 3 giai đoạn. Ngưỡng giữ nguyên được. Đã đính chính `docs/16` §5 (giữ cảnh báo cho chỗ đọc mức thô).
 - **⛔ Bác luôn kết luận trung gian của chính phiên này** ("AI-GPR trượt Crimea 2014"): sai do tôi đặt cửa sổ MỘT PHÍA [D, D+3] — AI-GPR kích *trước* ngày sáp nhập (quanh trưng cầu dân ý). Cửa sổ đối xứng [D−3, D+3]: **cả hai 8/8** sự kiện lớn.
 - **⚠️ Rào cản THẬT (mới): cùng tần suất KHÔNG phải cùng ngày.** Jaccard chỉ **0.203** (cửa sổ 2015–2023: 0.189) — bốn phần năm số ngày kích của chuỗi này thì chuỗi kia im. Đổi nguồn JUMP **là đổi thước đo**. Phương án "dùng cả hai" (hợp) đẩy tần suất S4 lên **8.64%**, gần gấp đôi — đổi spec, không phải nâng cấp miễn phí.
-- **Lợi ích vận hành đo được: AI-GPR mới hơn GPRD 32 ngày** (2026-07-31 vs 2026-06-29) — đúng nguyên nhân cờ `chain_a_stale` bật ở lần chạy thật 2026-08-08.
+- **⚠️ Độ tươi PHỤ THUỘC VINTEGE, đã tự đảo chiều trong vòng một ngày.** Vintage 2026-08-05: AI-GPR mới hơn GPRD 32 ngày (2026-07-31 vs 2026-06-29) — đó từng là lập luận vận hành mạnh nhất cho fallback. Vintage 2026-08-08 user tải lại: **GPRD mới hơn AI-GPR 3 ngày** (2026-08-03 vs 2026-07-31), chiều ngược lại. Bài học: đây là thuộc tính của HAI FILE ĐÃ TẢI chứ không phải đặc tính bền của hai nguồn — **không được dùng làm lý do kiến trúc**. Giá trị thật của fallback là nó đối xứng, xử lý được cả hai chiều.
 - **Việc code (giữ hành vi mặc định KHÔNG đổi):** gỡ hard-code `series_id='GPRD'` trong `store.load_jump_series` → tham số `series_id` (mặc định vẫn `GPRD`) + `fallback_series_id` (mặc định `None` = tắt). Chuỗi thực dùng ghi vào `Series.attrs["series_id"]` và **nêu thẳng trong `sample_caveat`** khi khác mặc định — vì Jaccard thấp, một S4 từ AI-GPR không so trực tiếp được với S4 từ GPRD. **KHÔNG đổi mặc định, KHÔNG dùng hợp/giao** cho tới khi có gold set (KĐ-E1c vẫn bị chặn bởi `data_blockers.gold_events_csv`).
 - Guard P1 bắt được chính tôi khi viết caveat: gõ số `0.203` vào văn xuôi → chặn đúng, đã đổi thành trỏ tới report thay vì chép số.
 
@@ -231,8 +231,15 @@ Phase 1a chạy xong 2026-08-02 (`scripts/run_t2_full.py`). Mẫu **231 tháng**
 
 ## Dữ liệu đã có sẵn (trong `data/` khi user cung cấp)
 
-- `data_gpr_daily_recent.xls`: GPRD/GPRD_ACT/GPRD_THREAT daily, 1985 → 2026-06-29. DÙNG ĐƯỢC NGAY.
-- `data_gpr_export_202607.xls` (bản 44 nước, ĐÃ CÓ): 1518 dòng × 115 cột, monthly 1900 → 2026-06. Chứa 44 cột `GPRC_*` (recent 1985+) + 44 cột `GPRHC_*` (historical 1900+), gồm cả `GPRC_VNM` và `GPRHC_VNM`. Cột dictionary: `var_name`/`var_label`.
+⚠️ **Layout `data/` ĐÃ ĐỔI (2026-08-08) — tách 2 thư mục con, KHÔNG hard-code đường dẫn nữa:**
+- `data/GPR index/` — GPR gốc Caldara-Iacoviello (`.xls`). Tên file mang hậu tố ` (1)` do trình duyệt tự thêm khi tải (`data_gpr_daily_recent (1).xls`) — **hậu tố này không ổn định**, lần tải sau có thể khác.
+- `data/AI-GPRs/` — 6 file AI-GPR (`.csv`).
+
+Vì vậy mọi `DEFAULT_*` đường dẫn đi qua `data_files._resolve_data_file()` (glob nhiều pattern, lấy bản mtime mới nhất, chịu được cả layout phẳng cũ lẫn layout thư mục con mới). **Thêm nguồn mới thì thêm pattern ở đó, đừng gõ đường dẫn cứng** — đã hỏng một lần vì lý do này.
+
+- GPR daily (`data/GPR index/data_gpr_daily_recent*.xls`): GPRD/GPRD_ACT/GPRD_THREAT daily, 1985 → **2026-08-03** (15190 dòng, vintage `a429b2431795`). Bản trước dừng 2026-06-29 (vintage `8cc9bf...`).
+- GPR monthly (`data/GPR index/data_gpr_export*.xls`, bản 44 nước): 1519 dòng × 115 cột, monthly 1900 → **2026-07**. Chứa 44 cột `GPRC_*` (recent 1985+) + 44 cột `GPRHC_*` (historical 1900+), gồm cả `GPRC_VNM` và `GPRHC_VNM`. Cột dictionary: `var_name`/`var_label`.
+- AI-GPR (`data/AI-GPRs/`): 6 file, **vintage KHÔNG đổi** ở lần cập nhật 2026-08-08 (daily vẫn `13b8e8b48d41` → 2026-07-31, monthly `92b9ba3bd38f`). Chỉ GPR gốc được làm mới.
 
 ### Lưu ý phân phối GPRC_VNM (quan trọng cho econometrics)
 - GPRC_VNM: mean ≈ 0.05, std ≈ 0.05, **lệch phải mạnh** (đa số tháng ~0, thỉnh thoảng spike). Đặc tính chung của country-GPR nước nhỏ.

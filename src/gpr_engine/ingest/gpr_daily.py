@@ -65,9 +65,21 @@ def upsert(long: pd.DataFrame, dsn: str) -> int:
     return len(long)
 
 
+def _default_path() -> str:
+    """Duong dan mac dinh — do qua data_files._resolve_data_file.
+
+    Import LAZY trong ham (khong o dau module) de tranh vong import:
+    data_files.py da import tu chinh module ingest nay
+    (SERIES/PUBLISH_LAG_DAYS), nen import nguoc o cap module se gay
+    circular import khi nap goi.
+    """
+    from ..econometrics.data_files import DEFAULT_GPR_DAILY
+    return DEFAULT_GPR_DAILY
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--path", default="data/data_gpr_daily_recent.xls")
+    ap.add_argument("--path", default=_default_path())
     ap.add_argument("--dsn", required=True, help="postgresql://user:pass@host/db")
     ap.add_argument("--source-version", default="gpr_daily_recent_202606",
                     help="vintage của file nguồn")

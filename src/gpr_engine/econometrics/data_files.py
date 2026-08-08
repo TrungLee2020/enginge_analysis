@@ -27,7 +27,31 @@ from ..ingest.gpr_daily import SERIES as GPR_DAILY_SERIES
 from ..ingest.market_data import FRED_MAP
 from .dataset import dlog, fill_weekend, log1p_gpr, transform_global_macro
 
-DEFAULT_GPR_DAILY = "data/data_gpr_daily_recent.xls"
+def _resolve_data_file(*patterns: str) -> str:
+    """Tim file du lieu theo NHIEU glob, tra ban MOI NHAT (mtime) khop duoc.
+
+    Ly do ton tai (2026-08-08): layout `data/` da doi it nhat mot lan — tu
+    phang (`data/ai_gpr_data_daily.csv`) sang co thu muc con
+    (`data/AI-GPRs/...`, `data/GPR index/...`), va ban `.xls` tai ve mang hau
+    to " (1)" cua trinh duyet (`data_gpr_export (1).xls`). Hard-code mot duong
+    dan lam CA BON default gay khong tim thay file cung luc; hard-code ten moi
+    se lai hong khi hau to " (1)" bien mat o lan tai sau.
+
+    Tra ve PATTERN DAU TIEN neu khong khop gi — de thong bao loi cua loader
+    (vd `_AI_GPR_MISSING_MSG`) van neu duong dan mong doi, thay vi chuoi rong.
+    """
+    hits: list[Path] = []
+    for pat in patterns:
+        hits.extend(p for p in Path().glob(pat) if p.is_file())
+    if not hits:
+        return patterns[0]
+    # Nhieu ban cung ton tai (vd giu ca ban cu lan ban " (1)") -> lay ban moi
+    # nhat theo mtime. KHONG chon theo ten: " (1)" khong noi len gi ve vintage.
+    return str(max(hits, key=lambda p: p.stat().st_mtime))
+
+
+DEFAULT_GPR_DAILY = _resolve_data_file(
+    "data/GPR index/data_gpr_daily_recent*.xls", "data/data_gpr_daily_recent*.xls")
 DEFAULT_CACHE_DIR = "data/cache"
 
 # Cac macro dua vao tang 2 mac dinh — DU 4 KENH global.
@@ -346,7 +370,8 @@ def build_tier2_panel(
 # ---------------------------------------------------------------------------
 # Track MONTHLY (docs/10 F3, docs/11 E3) — GPR global + GPRC_VNM, #10 no-ffill
 # ---------------------------------------------------------------------------
-DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202607.xls"
+DEFAULT_GPR_MONTHLY = _resolve_data_file(
+    "data/GPR index/data_gpr_export*.xls", "data/data_gpr_export*.xls")
 
 
 DEFAULT_COUNTRY = "VNM"
@@ -487,8 +512,10 @@ FRED_FREIGHT = "PCU483111483111"
 # `load_ai_gpr_monthly()`. Day KHONG PHAI file "Country Decompositions" (
 # ai_gpr_country_monthly.csv / ai_gpr_bilateral_monthly.csv /
 # ai_gpr_country_eventtype_monthly.csv) — 3 file do CHUA tai, CHUA co loader.
-DEFAULT_AI_GPR_MONTHLY = "data/ai_gpr_data_monthly.csv"
-DEFAULT_AI_GPR_DAILY = "data/ai_gpr_data_daily.csv"
+DEFAULT_AI_GPR_MONTHLY = _resolve_data_file(
+    "data/AI-GPRs/ai_gpr_data_monthly.csv", "data/ai_gpr_data_monthly.csv")
+DEFAULT_AI_GPR_DAILY = _resolve_data_file(
+    "data/AI-GPRs/ai_gpr_data_daily.csv", "data/ai_gpr_data_daily.csv")
 
 # AI_GPR_COLUMNS (ten that trong file -> ten dung trong repo, CA daily lan
 # monthly) chuyen ve `ingest/ai_gpr.py` lam nguon CHINH THUC (2026-08-05, cung
@@ -635,9 +662,13 @@ def load_ai_gpr_monthly(
 # ⚠️ CHƯA có `ai_gpr_country_monthly.csv` (200 nước × 4 vai) — file thứ 4
 # docs/16 §1 liệt kê, chưa tải, chưa xác minh, không có loader ở đây.
 # ---------------------------------------------------------------------------
-DEFAULT_AI_GPR_EVENTTYPE_MONTHLY = "data/ai_gpr_eventtype_monthly.csv"
-DEFAULT_AI_GPR_COUNTRY_EVENTTYPE_MONTHLY = "data/ai_gpr_country_eventtype_monthly.csv"
-DEFAULT_AI_GPR_BILATERAL_MONTHLY = "data/ai_gpr_bilateral_monthly.csv"
+DEFAULT_AI_GPR_EVENTTYPE_MONTHLY = _resolve_data_file(
+    "data/AI-GPRs/ai_gpr_eventtype_monthly.csv", "data/ai_gpr_eventtype_monthly.csv")
+DEFAULT_AI_GPR_COUNTRY_EVENTTYPE_MONTHLY = _resolve_data_file(
+    "data/AI-GPRs/ai_gpr_country_eventtype_monthly.csv",
+    "data/ai_gpr_country_eventtype_monthly.csv")
+DEFAULT_AI_GPR_BILATERAL_MONTHLY = _resolve_data_file(
+    "data/AI-GPRs/ai_gpr_bilateral_monthly.csv", "data/ai_gpr_bilateral_monthly.csv")
 
 # 8 loại sự kiện (xác minh trên `ai_gpr_eventtype_monthly.csv`, vintage
 # 2026-08-05) — CỘNG DỒN ĐÚNG về GPR_AI (kiểm tay: corr=0.9999999999976,
@@ -844,7 +875,8 @@ def select_bilateral_pair(df: pd.DataFrame, actor: str, target: str) -> pd.Serie
 # oil-vùng không cộng dồn. Đây là file khớp THẲNG vào khung docs/16 §3
 # ("VN gần như luôn spillover") — `select_country_role(df, "Vietnam")
 # ["spillover"]` là chuỗi tháng đo đúng vai trò đó, không cần tự suy ra.
-DEFAULT_AI_GPR_COUNTRY_ROLE_MONTHLY = "data/ai_gpr_country_monthly.csv"
+DEFAULT_AI_GPR_COUNTRY_ROLE_MONTHLY = _resolve_data_file(
+    "data/AI-GPRs/ai_gpr_country_monthly.csv", "data/ai_gpr_country_monthly.csv")
 AI_GPR_ROLES = ("all", "initiator", "respondent", "spillover")
 
 

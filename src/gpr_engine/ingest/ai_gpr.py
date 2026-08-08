@@ -49,8 +49,21 @@ AI_GPR_COLUMNS: dict[str, str] = {
     "GPR_OIL_NorthSea": "AIGPR_OIL_NORTHSEA",
 }
 
-DEFAULT_PATH_DAILY = "data/ai_gpr_data_daily.csv"
-DEFAULT_PATH_MONTHLY = "data/ai_gpr_data_monthly.csv"
+# Layout `data/` da doi mot lan (phang -> co thu muc con `data/AI-GPRs/`).
+# Do lai qua glob thay vi hard-code de khong hong khi layout doi tiep.
+def _resolve(*patterns: str) -> str:
+    from pathlib import Path
+    for pat in patterns:
+        hits = [p for p in Path().glob(pat) if p.is_file()]
+        if hits:
+            return str(max(hits, key=lambda p: p.stat().st_mtime))
+    return patterns[0]
+
+
+DEFAULT_PATH_DAILY = _resolve("data/AI-GPRs/ai_gpr_data_daily.csv",
+                              "data/ai_gpr_data_daily.csv")
+DEFAULT_PATH_MONTHLY = _resolve("data/AI-GPRs/ai_gpr_data_monthly.csv",
+                                "data/ai_gpr_data_monthly.csv")
 
 # Do tre publish — GIA DINH THAN TRONG, CHUA VERIFY voi vintage that (cung tinh
 # trang thai voi PUBLISH_LAG_DAYS cua ingest/gpr_daily.py va gpr_monthly.py).

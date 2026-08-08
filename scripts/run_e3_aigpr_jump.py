@@ -144,6 +144,14 @@ def main() -> None:
         "aigpr_last": aigpr_raw.index.max().date().isoformat(),
         "freshness_days": int((aigpr_raw.index.max() - gprd_raw.index.max()).days),
     }
+    # Dau cua `freshness_days` DOI theo vintage nguoi van hanh tai ve — bao cao
+    # phai tu dien dat dung chieu, khong duoc gia dinh AI-GPR luon moi hon
+    # (gia dinh do dung o vintage 2026-06-29 va SAI ngay o vintage ke tiep).
+    s["fresher_name"] = "AI-GPR" if s["freshness_days"] > 0 else "GPRD"
+    if s["freshness_days"] == 0:
+        s["fresher_name"] = "hai chuỗi ngang nhau, không chuỗi nào"
+    s["gap_vs_threshold"] = ("VƯỢT" if abs(s["freshness_days"]) > 35 else
+                             "vẫn nằm trong")
     for name, s0, e0 in (("p1", "1986", "1999"), ("p2", "2000", "2014"),
                          ("p3", "2015", "2026")):
         sub = fire.loc[s0:e0]
@@ -231,13 +239,20 @@ def main() -> None:
         "Hợp làm S4 kích **gần gấp đôi** — đổi ý nghĩa của bậc S4, không phải nâng "
         "cấp miễn phí. Giao thì chặt hơn nhiều nhưng cũng là một thước đo mới. Cả hai "
         "đều là **thay đổi spec**, phải qua governance, không phải việc nối dây.\n",
-        "## 5. Lợi ích vận hành THẬT và đo được: độ tươi\n",
+        "## 5. Độ tươi dữ liệu — PHỤ THUỘC VINTAGE, không phải thuộc tính cố định\n",
         f"- GPRD mới nhất: {s['gprd_last']}",
         f"- AI-GPR mới nhất: {s['aigpr_last']}",
-        f"- AI-GPR mới hơn **{s['freshness_days']} ngày**\n",
-        "Đây không phải chi tiết vụn: ngưỡng `chain_a_stale` của pipeline là 35 ngày, "
-        "và chạy thật ngày 2026-08-08 đã bị gắn cờ stale đúng vì GPRD dừng ở "
-        f"{s['gprd_last']}. Với cùng ngày đó, AI-GPR **không** stale.\n",
+        f"- **{s['fresher_name']} mới hơn {abs(s['freshness_days'])} ngày**\n",
+        "⚠️ **Đọc kỹ dấu:** đây là thuộc tính của HAI FILE ĐÃ TẢI, không phải đặc "
+        "tính bền của hai nguồn. Cùng bộ code này, ở vintage trước (GPRD dừng "
+        "2026-06-29) AI-GPR mới hơn 32 ngày và đó là lập luận vận hành mạnh nhất "
+        "cho fallback; chỉ cần người vận hành tải lại GPR là chiều đảo ngược. Vì "
+        "vậy **không được biến quan sát này thành lý do kiến trúc** — giá trị của "
+        "fallback là ở chỗ nó xử lý được cả hai chiều, không phải ở chỗ chuỗi nào "
+        "đang tươi hơn hôm nay.\n",
+        f"Đối chiếu ngưỡng `chain_a_stale` (35 ngày) tại ngày chạy báo cáo: chuỗi "
+        f"tươi hơn là {s['fresher_name']}; khoảng cách giữa hai chuỗi "
+        f"({abs(s['freshness_days'])} ngày) {s['gap_vs_threshold']} ngưỡng đó.\n",
         "## 6. Khuyến nghị\n",
         "1. **Giữ GPRD làm nguồn JUMP mặc định.** Không có bằng chứng AI-GPR dự báo "
         "tốt hơn — câu đó thuộc KĐ-E1c (AUC trên gold set) và vẫn bị chặn bởi "
@@ -245,9 +260,11 @@ def main() -> None:
         "2. **Gỡ hard-code `series_id='GPRD'`** thành tham số cấu hình được, mặc định "
         "vẫn GPRD (hành vi không đổi). Hiện tại muốn thử AI-GPR phải sửa mã nguồn — "
         "đó mới là thứ đáng sửa ngay.",
-        "3. **Fallback khi GPRD stale**: chuỗi chính stale thì đọc AI-GPR thay vì trả "
-        "chuỗi rỗng, và ghi rõ đã dùng chuỗi nào. Giải đúng vấn đề vận hành ở §5 mà "
-        "không đụng thước đo khi GPRD còn tươi.",
+        "3. **Fallback khi chuỗi chính stale**: chuỗi chính stale thì đọc chuỗi dự "
+        "phòng thay vì trả chuỗi rỗng, và ghi rõ đã dùng chuỗi nào. Giá trị của nó "
+        "là **đối xứng và không phụ thuộc vintage hiện tại** (§5): chuỗi nào cũng có "
+        "thể là bên cũ hơn tuỳ lần tải, và khi cả hai còn tươi thì fallback không "
+        "kích — thước đo giữ nguyên.",
         "4. **KHÔNG dùng hợp/giao** cho tới khi có gold set — §4 cho thấy đó là đổi "
         "spec, và ta chưa có tiêu chí để nói bản nào tốt hơn.",
         "5. **Đính chính `docs/16` §5**: khẳng định 'phải hiệu chuẩn lại q95/q99' sai "
