@@ -56,6 +56,19 @@ User tự chạy `docker compose up postgres` + `scripts/test_llm_and_db.py` v�
 - **✅ Phát hiện thật, đã vá tận gốc: Guard P1 chặn liên tục vì Gemini tự bịa số trong `rationale`** (vd "risk escalated by roughly 42%" — số không có trong tin gốc lẫn payload). Đây ĐÚNG là loại lỗi Guard P1 sinh ra để chặn (tiền lệ có thật: report cũ từng ghi "1.8×" trong khi payload là 2.77×) — không phải bug, guard hoạt động đúng. Nhưng thay vì chỉ dựa vào lưới an toàn cuối, đã sửa NGUỒN: thêm rule `rationale QUALITATIVE ONLY, never invent numbers` vào `SYSTEM_PROMPT` + `docs/00 §2.4` (doc trước, code sau — đúng quy ước), **bump `PROMPT_VERSION: p1 → p2`** (đổi prompt = đổi `content_hash`, đúng ý nghĩa versioning #4). Guard P1 giữ nguyên nghiêm ngặt — đây là giảm tần suất bị chặn, không phải nới lỏng.
 - 353 test pass (334 cũ ở vòng trước → giờ 353, gồm cả test trước đó luôn fail vì thiếu `.xls` — giờ pass vì file đã có).
 
+### 🔍 Rà công thức GPR/AI-GPR + bản tham chiếu "1 tin vào → ra gì" (2026-08-08, vòng 2)
+
+Đối chiếu code với `docs/00` §2.5 sau khi user hỏi "hệ thống phân tích 1 tin ra sao, kết quả thế nào". **Công thức KHỚP nguyên văn spec, không lệch** — S-GPR/S-CONC/w(role) đều đúng, kể cả chi tiết S-CONC cố ý KHÔNG nhân `specificity`. Số thật quan sát trên chạy Gemini (`S-GPR=0.168`) tái lập chính xác bằng tay: `0.6 (minister) × 0.40 (v) × 0.7 (specificity)`.
+
+**`tests/pipeline/test_golden_news_item.py` (mới, 27 test)** — bản tham chiếu ghim TOÀN BỘ chuỗi cho một tin cụ thể với số tính tay: S-GPR theo 4 vai · v<0 → S-GPR=0 không âm (hai chiều giữ riêng) · percentile · ladder S0/S4 · γ channel theo commitment · 6→4 kênh truyền dẫn · Guard P1 · không nhận diện được cặp nước. Khác các test cũ (kiểm từng mảnh) — file này đọc được như tài liệu, và đã kiểm chứng KHÔNG rỗng (đổi giá trị kỳ vọng → test đỏ ngay).
+
+**3 giới hạn THẬT phát hiện khi rà (đều đã ghim bằng test, không phải bug — nhưng phải biết trước khi đọc output):**
+1. **Ladder thực tế chỉ đạt được S0 hoặc S4.** S2 cần `quad3_pct`/`quad4_pct` (GDELT chân C — CHƯA ingest, luôn NaN); S1/S3 `docs/00` §4.1 chưa cho ngưỡng nên không có trong `ladder_v1.yaml`. S4 chỉ kích khi `jump_pct > 95`.
+2. **`s_gpr_pctile = 0.0` ở tin đầu KHÔNG phải "thấp kỷ lục"** mà là "chưa đủ lịch sử" — `expanding_percentile(min_periods=60)` trả NaN cho tới khi cặp actor>target tích đủ **60 ngày**, pipeline quy NaN→0.0. Percentile chỉ có nghĩa sau mốc đó.
+3. **⚠️ AI-GPR đã ingest nhưng KHÔNG được dùng ở đường serving.** `service/store.py::load_jump_series` truy vấn CỨNG `series_id = 'GPRD'` — toàn bộ 12 chuỗi AI-GPR (`AIGPR`/`AIGPR_ACT`/`AIGPR_THREAT` + 8 vùng oil) nạp vào `ext_series` nhưng không chuỗi nào chạm chuỗi "1 tin → 1 kết quả". **Chưa phải bug** (chưa ai quyết định AI-GPR thay hay bổ sung GPRD cho JUMP), nhưng đổi là đổi thước đo shock → **phải hiệu chuẩn lại ngưỡng q95/q99** vì AI-GPR mượt hơn, đuôi mỏng hơn, không có ngày bằng 0 (`docs/16` §5). Test `test_chain_a_reads_GPRD_only_not_AIGPR` ghim hiện trạng để việc nối (nếu làm) là quyết định có chủ đích.
+
+380 test pass.
+
 ## Trạng thái trước đó (2026-08-05, vòng 2)
 
 ### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh
