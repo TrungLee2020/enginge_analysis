@@ -89,9 +89,18 @@ from gpr_engine.scoring.statement_scorer import (
 GEMINI_OPENAI_COMPAT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 DEFAULT_TEXT = (
-    "We are prepared to impose sanctions if these violations continue, "
-    "and we call on our allies to join us in condemning this aggression."
+    "The United States is prepared to impose new sanctions on Iran if these "
+    "nuclear violations continue, and we call on our allies to join us in "
+    "condemning this aggression."
 )
+# Câu mẫu PHẢI nêu rõ tên nước — bản trước không có, khiến LLM trả
+# actor_country/target_country=null, `pair_identified=False`, và toàn bộ
+# S-GPR/Ladder/measurement_card bị bỏ qua một cách ĐÚNG THIẾT KẾ (không tính
+# chỉ số theo cặp khi không xác định được cặp) nhưng lại KHÔNG có
+# measurement_card_error nào giải thích — vì nhánh đó nằm ngoài
+# `if pair_identified:` trong process_news_item, không đi qua try/except.
+# Phát hiện khi audit output thật của người dùng (2026-08-08) — không phải
+# bug production, là bug ở CÂU MẪU TEST này.
 
 
 def _load_dotenv(path: Path) -> None:
@@ -244,9 +253,16 @@ def main() -> None:
         print(f"Bị loại: {result.reason}")
         return
 
+    print(f"Pair identified={result.pair_identified} "
+         f"(actor={result.score.get('actor_country')} -> target={result.score.get('target_country')})")
     print(f"S-GPR now={result.s_gpr_now} prev={result.s_gpr_prev} pctile={result.s_gpr_pctile}")
     print(f"Ladder state={result.ladder_state} (computed={result.ladder_computed})")
-    if not result.ladder_computed and result.measurement_card_error:
+    if not result.pair_identified:
+        print("  -> lý do: LLM không xác định được actor_country/target_country "
+             "(hoặc câu mẫu không nêu tên nước) — S-GPR/Ladder/measurement_card "
+             "bị bỏ qua ĐÚNG THIẾT KẾ, không phải lỗi. Dùng --text để truyền câu "
+             "khác có nêu rõ nước.")
+    elif not result.ladder_computed and result.measurement_card_error:
         # Ly do THAT ladder_computed=False — thieu dong nay truoc day khien
         # ket qua "S-GPR=0/ladder=0" trong giong loi trong khi co the chi la
         # suy giam co kiem soat (vd Guard P1 chan rationale, hoac role la —
