@@ -461,6 +461,11 @@ DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202608.xls"
 
 DEFAULT_COUNTRY = "VNM"
 
+# Nguon chuoi GPR TOAN CAU cho panel thang (P1.3). Them nguon moi phai them ca
+# nhanh xu ly trong build_monthly_panel — de o day de loi la ValueError ro rang
+# chu khong phai KeyError giua chung.
+SHOCK_SOURCES = ("gpr_ci", "ai_gpr")
+
 
 # Tach ACT/THREAT o track THANG (docs/14 §2 muc 1a "tach ACT/THREAT").
 # Ten cot trong file monthly KHAC file daily: monthly la GPRA/GPRT, daily la
@@ -1250,6 +1255,9 @@ def build_monthly_panel(
     battery: bool = False,
     shock_axis: bool = False,
     components: bool = False,
+    dual_component: bool = False,
+    shock_source: str = "gpr_ci",
+    ai_gpr_path: str = DEFAULT_AI_GPR_MONTHLY,
 ) -> pd.DataFrame:
     """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_<c>⊥ + macro.
 
@@ -1278,8 +1286,30 @@ def build_monthly_panel(
         van giu (ban cu, KHONG doi ten) va bang `GPR_INNOVATION`.
       - components=True: them truc shock cho GPR_ACT/GPR_THREAT (tach kenh tho
         giai doan 1, docs/11 §5.3 — khong can chan B). Chi co tac dung khi
-        shock_axis=True.
+        shock_axis=True (VOI truc 3 thuoc do) hoac dual_component=True.
+      - dual_component=True: them `GPR_ANTICIPATED`/`GPR_SURPRISE` — SPEC CHINH
+        cua docs/17_master_plan.md §4.1 (spec kep, `DEC-2026-08-03-dual-component`).
+        Hai cot cong lai bang DUNG Δ LEVEL. Voi components=True them ca cap
+        cua GPR_ACT/GPR_THREAT (spec 4 regressor, §4.1).
+        ⚠️ Dua CA HAI vao cung mot hoi quy — dung chon mot. Va bao cao dong gop
+        phai CHUAN HOA (`shocks.standardized_contribution`): he so tho cua hai
+        cot nay khong so duoc, Var(ANT)/Var(SUR) ~0.1.
       - extra_monthly: cot monthly khac do caller cung cap — join theo thang.
+
+    `shock_source` — nguon chuoi GPR TOAN CAU (P1.3, docs/17_master_plan.md §6):
+      - "gpr_ci"  (mac dinh): GPR goc Caldara-Iacoviello tu `gpr_path`. Ban cu,
+        khong doi gi.
+      - "ai_gpr": AI-GPR monthly tu `ai_gpr_path` (AIGPR/AIGPR_ACT/AIGPR_THREAT
+        -> doi ten thanh GPR/GPR_ACT/GPR_THREAT de MOI cot phia sau giu nguyen
+        ten). Dung de chay bang γ ban thu hai cua Phase 1a va do attenuation
+        do sai so do.
+        ⚠️ Cot nuoc `GPRC_<c>` VAN lay tu `gpr_path` (file C-I): AI-GPR tach
+        nuoc nam o file RIENG (`ai_gpr_country_monthly.csv`) voi 4 vai tro, KHONG
+        phai cung schema — tron hai thu do vao day se lam λ doi nghia trong im
+        lang. Doi nguon λ la viec rieng, chua lam.
+        ⚠️ Hai nguon co PHAN PHOI khac han (sd 47.6 vs 61.5, autocorr 0.580 vs
+        0.754 tren mau chung 1985+ — `scripts/check_master_plan_claims.py`), nen
+        nguong/phan vi hieu chuan tren ban nay KHONG dung cho ban kia.
 
     ⚠️ `country`: doi nuoc KHONG doi bat cu gi khac trong panel — tang 1-2 la ENGINE
     generic (#8), chi tang 3 co params rieng nuoc. Dung cho Phase 1b (nuoc pilot).
@@ -1287,11 +1317,27 @@ def build_monthly_panel(
     Innovation monthly: AR(p) rolling, p chon BIC/dev-window (giong daily, nhung
     min_train nho hon vi mau thang it). Complete-case 1 lan.
     """
-    from .shocks import innovation
+    from .shocks import delta_decomposition, innovation
     from .tier3_country import orthogonalize
+
+    if shock_source not in SHOCK_SOURCES:
+        raise ValueError(
+            f"shock_source={shock_source!r} khong thuoc {SHOCK_SOURCES}.")
 
     gpr_m = load_gpr_monthly(gpr_path, country=country,
                              components=components)          # GPR, GPRC_<c> (tho)
+    if shock_source == "ai_gpr":
+        # Thay CHUOI TOAN CAU bang AI-GPR; giu nguyen cot nuoc cua file C-I
+        # (xem canh bao o docstring — AI-GPR tach nuoc o file khac, schema khac).
+        ai = load_ai_gpr_monthly(ai_gpr_path)
+        rename = {"AIGPR": "GPR", "AIGPR_ACT": "GPR_ACT", "AIGPR_THREAT": "GPR_THREAT"}
+        ai = ai[[c for c in rename if c in ai.columns]].rename(columns=rename)
+        keep = [c for c in gpr_m.columns if c.startswith("GPRC_")]
+        gpr_m = ai.join(gpr_m[keep], how="inner")
+        gpr_m.attrs["shock_source"] = "ai_gpr"
+        gpr_m.attrs["ai_gpr_vintage"] = ai_gpr_vintage(ai_gpr_path)
+    else:
+        gpr_m.attrs["shock_source"] = "gpr_ci"
     gpr_m = gpr_m.loc[start:end] if end else gpr_m.loc[start:]
     country_col = f"GPRC_{country}"
 
@@ -1331,6 +1377,13 @@ def build_monthly_panel(
                 gpr_m[name], prefix=prefix, min_train=min_train,
                 max_order=max_order)
             frames.append(align_monthly_gpr_to_information_time(axis))
+    if dual_component:
+        # Spec CHINH docs/17_master_plan.md §4.1. Di cung duong information-time
+        # nhu moi thuoc do khac — thang M chi dung o bucket M+1.
+        for name in ["GPR", *(["GPR_ACT", "GPR_THREAT"] if components else [])]:
+            comp = delta_decomposition(gpr_m[name].rename(name),
+                                       min_train=min_train, max_order=max_order)
+            frames.append(align_monthly_gpr_to_information_time(comp))
     if freight:
         fr_raw = load_freight_monthly(start, end, cache_dir, refresh)
         frames.append(transform_freight(fr_raw))
