@@ -1,3 +1,7 @@
+> ⛔ **BẢN v1.0 — ĐÃ ĐƯỢC THAY THẾ BỞI `docs/17_master_plan.md` (v1.1, 2026-08-08).**
+> Giữ lại để tra lịch sử quyết định. **Không dùng làm căn cứ thi công**: bản này có 6 sai lệch về dữ liệu và 6 mâu thuẫn logic đã kiểm chứng trên file/code thật — liệt kê đầy đủ ở phụ lục của `docs/17_master_plan.md`.
+> Tên file gốc trên main (`1ef98a8`) gõ nhầm; tiêu đề dưới đây ghi số cũ, số thật của doc này là **17**.
+
 # 10 — MASTER PLAN (BẢN CHỐT)
 
 **Phiên bản:** 1.0 — 2026-08-03. **Tự chứa.**

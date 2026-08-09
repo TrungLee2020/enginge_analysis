@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import re
 import warnings
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -29,6 +30,109 @@ from .dataset import dlog, fill_weekend, log1p_gpr, transform_global_macro
 
 DEFAULT_GPR_DAILY = "data/data_gpr_daily_recent.xls"
 DEFAULT_CACHE_DIR = "data/cache"
+
+# Thu muc con cua data/ bi BO QUA khi do tim (cache la thu muc GHI, khong phai
+# nguon; do vao day se nham file cache voi file nguon).
+_RESOLVE_SKIP_DIRS = {"cache"}
+_RESOLVE_MAX_DEPTH = 3
+# Duoi " (1)", " (2)"... trinh duyet them khi tai trung ten — bo truoc khi so.
+_COPY_SUFFIX_RE = re.compile(r"\s*\(\d+\)$")
+# Ky tu duoc coi la RANH GIOI token khi so hai ten. Bat buoc co ranh gioi de
+# "data_gpr" khong khop "data_gpr_daily_recent" — hai file khac nhau that.
+_STEM_BOUNDARY = ("_", "-", " ", ".")
+
+
+def _stems_match(candidate_stem: str, target_stem: str) -> bool:
+    """Hai ten file co phai cung MOT nguon du lieu, khac cach dat ten?
+
+    Doi xung hai chieu, vi ca hai huong deu gap that:
+      - `data_gpr_daily_recent (1)` vs `data_gpr_daily_recent` — ban sao trinh
+        duyet, ung vien DAI hon.
+      - `data_gpr_export (1)` vs `data_gpr_export_202607` — DEFAULT_* mang hau
+        to vintage ma file tai ve khong co, ung vien NGAN hon.
+
+    Phan noi them phai bat dau bang mot ky tu ranh gioi (`_`, `-`, ` `, `.`),
+    nen `data_gpr_exp` KHONG khop `data_gpr_export` (cat giua token). Mot tien
+    to DUNG ranh gioi thi VAN khop (`data_gpr` ~ `data_gpr_daily_recent`) —
+    day la co y, vi hai file cung goc thuong chi khac hau to vintage; truong
+    hop nhap nhang that su duoc chan o tang tren: nhieu ket qua -> raise.
+    """
+    a = _COPY_SUFFIX_RE.sub("", candidate_stem).strip()
+    b = _COPY_SUFFIX_RE.sub("", target_stem).strip()
+    if a == b:
+        return True
+    long_, short = (a, b) if len(a) > len(b) else (b, a)
+    return long_.startswith(short) and long_[len(short)] in _STEM_BOUNDARY
+
+
+def resolve_data_path(path: str | Path, *, search_root: str | Path = "data") -> Path:
+    """Tim file du lieu khi layout thu muc THAT khac `DEFAULT_*`.
+
+    Ly do ton tai: file GPR/AI-GPR la file TAI TAY, nguoi van hanh tha vao
+    `data/` theo cach cua ho — thuc te da gap `data/AI-GPRs/ai_gpr_data_daily.csv`
+    va `data/GPR index/data_gpr_daily_recent (1).xls` trong khi `DEFAULT_*` tro
+    thang `data/<ten>`. Truoc thay doi nay, KHONG script nao chay duoc ngay sau
+    khi clone + tha file (tests/test_report_guard_p1.py fail dung vi the).
+
+    Thu tu do tim, DUNG lai o buoc dau tien co ket qua:
+      1. Chinh `path` (duong dan tuyet doi/tuong doi nguoi goi dua vao).
+      2. Cung TEN FILE, o bat ky thu muc con nao cua `search_root` (bo qua
+         `cache/`), sau toi da `_RESOLVE_MAX_DEPTH` cap.
+      3. Cung phan mo rong + ten file la TIEN TO — bat cac ban sao trinh duyet
+         dat ten kieu `data_gpr_daily_recent (1).xls`.
+
+    KHONG tim thay -> tra ve `Path(path)` nguyen ban, de cac guard `.exists()`
+    san co in ra thong bao huong dan tai file (chung noi ro hon loi cua ham nay).
+
+    NHIEU ket qua o cung mot buoc -> `FileNotFoundError` liet ke het. Tu chon
+    mot ban trong im lang la chon vintage du lieu ho nguoi dung — vi pham #7
+    (ghim vintage) va lam report mat tai lap khi hai ban khac noi dung.
+    """
+    p = Path(path)
+    if p.exists():
+        return p
+
+    root = Path(search_root)
+    if not root.is_dir():
+        return p
+
+    def _candidates(depth_limit: int) -> list[Path]:
+        out: list[Path] = []
+        for child in root.rglob("*"):
+            if not child.is_file():
+                continue
+            rel = child.relative_to(root)
+            if len(rel.parts) > depth_limit:
+                continue
+            if any(part in _RESOLVE_SKIP_DIRS for part in rel.parts[:-1]):
+                continue
+            out.append(child)
+        return out
+
+    files = _candidates(_RESOLVE_MAX_DEPTH)
+    exact = sorted(f for f in files if f.name == p.name)
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise FileNotFoundError(
+            f"{path}: tim thay {len(exact)} file cung ten trong {root}/ — "
+            f"{[str(f) for f in exact]}. Chi ro duong dan (tham so `path`) "
+            "thay vi de ham tu chon: chon ho la chon vintage du lieu ho ban.")
+
+    prefixed = sorted(f for f in files
+                      if f.suffix == p.suffix and _stems_match(f.stem, p.stem))
+    if len(prefixed) == 1:
+        warnings.warn(
+            f"{path} khong co; dung {prefixed[0]} (khop tien to ten file). "
+            "Doi ten file ve dung chuan hoac truyen `path` tuong minh de "
+            "khong phu thuoc vao suy doan nay.", stacklevel=2)
+        return prefixed[0]
+    if len(prefixed) > 1:
+        raise FileNotFoundError(
+            f"{path}: khong co file dung ten, va {len(prefixed)} file khop tien "
+            f"to — {[str(f) for f in prefixed]}. Chi ro `path`.")
+
+    return p
 
 # Cac macro dua vao tang 2 mac dinh — DU 4 KENH global.
 #   - dxy dung chuoi NOI DAI (load_dxy_spliced): DTWEXM (major, 1973->2019) noi
@@ -46,7 +150,7 @@ def load_gpr_daily(path: str = DEFAULT_GPR_DAILY) -> pd.DataFrame:
     Dung dung parser cua ingest.gpr_daily (guard cot thieu). Gia tri THO,
     chua transform.
     """
-    df = pd.read_excel(path, sheet_name="Sheet1", header=0)
+    df = pd.read_excel(resolve_data_path(path), sheet_name="Sheet1", header=0)
     missing = [c for c in [*GPR_DAILY_SERIES, "date"] if c not in df.columns]
     if missing:
         raise ValueError(
@@ -346,10 +450,21 @@ def build_tier2_panel(
 # ---------------------------------------------------------------------------
 # Track MONTHLY (docs/10 F3, docs/11 E3) — GPR global + GPRC_VNM, #10 no-ffill
 # ---------------------------------------------------------------------------
-DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202607.xls"
+# Vintage 202608 (tai 2026-08-08, cung `data/GPR index/`). Doi tu 202607 sau khi
+# KIEM: hai file `data_gpr_export (1).xls` va `data_gpr_export_202608.xls` giong
+# nhau TUNG O tren ca 112 cot so (0 o lech, phu 1900-01 -> 2026-07), nen doi
+# default KHONG lam so lieu report doi — day la lam ro TEN, khong phai doi du
+# lieu. Neu lan sau nap file co so KHAC, phai bump `--data-version` khi ingest
+# (#4/#7), dung de trung version cu.
+DEFAULT_GPR_MONTHLY = "data/data_gpr_export_202608.xls"
 
 
 DEFAULT_COUNTRY = "VNM"
+
+# Nguon chuoi GPR TOAN CAU cho panel thang (P1.3). Them nguon moi phai them ca
+# nhanh xu ly trong build_monthly_panel — de o day de loi la ValueError ro rang
+# chu khong phai KeyError giua chung.
+SHOCK_SOURCES = ("gpr_ci", "ai_gpr")
 
 
 # Tach ACT/THREAT o track THANG (docs/14 §2 muc 1a "tach ACT/THREAT").
@@ -375,7 +490,7 @@ def load_gpr_monthly(
     ``components=True`` them GPR_ACT/GPR_THREAT (doi ten tu GPRA/GPRT trong file)
     cho viec tach kenh tho giai doan 1 (docs/11 §5.3) — khong can chan B.
     """
-    df = pd.read_excel(path, sheet_name="Sheet1", header=0)
+    df = pd.read_excel(resolve_data_path(path), sheet_name="Sheet1", header=0)
     col = f"GPRC_{country}"
     if col not in df.columns:
         available = sorted(c for c in df.columns if c.startswith("GPRC_"))
@@ -515,7 +630,7 @@ def describe_ai_gpr_file(path: str = DEFAULT_AI_GPR_DAILY) -> dict:
     Trả `{columns, n_rows, date_col_guess, vintage}`. KHÔNG transform gì: mục
     đích là xem file thật có gì trước khi tin `AI_GPR_COLUMNS`.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
     df = pd.read_csv(p, nrows=200)
@@ -537,7 +652,7 @@ def ai_gpr_vintage(path: str = DEFAULT_AI_GPR_DAILY) -> str | None:
     khác nhau; không ghim cái này thì `data_version` của report không phân biệt
     được chúng.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         return None
     return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
@@ -553,7 +668,7 @@ def _load_ai_gpr(
     chi khac tan suat/path. Khong xuat cong khai — dung qua
     `load_ai_gpr_daily`/`load_ai_gpr_monthly`.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
     mapping = dict(AI_GPR_COLUMNS if columns is None else columns)
@@ -728,7 +843,7 @@ def load_ai_gpr_eventtype_monthly(
     Xác minh 2026-08-05 trên file thật (1960-01-01..2026-07-01, 799 hàng).
     Cột: `AIGPR` (đối chiếu tổng) + 8 cột trong `AI_GPR_EVENT_TYPES`.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
     df = pd.read_csv(p)
@@ -758,7 +873,7 @@ def load_ai_gpr_country_eventtype_monthly(
     ghép ("Saudi Arabia")). KHÔNG rename/tách hết 1600 cột ở đây (nặng
     không cần thiết) — dùng `select_country_eventtype()` để lấy một nước.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
     df = pd.read_csv(p)
@@ -807,7 +922,7 @@ def load_ai_gpr_bilateral_monthly(
     KHÔNG trộn lẫn hai định dạng; chuyển đổi tường minh ở nơi dùng nếu cần
     khớp với chuỗi S-GPR nội bộ.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
     df = pd.read_csv(p)
@@ -864,7 +979,7 @@ def load_ai_gpr_country_monthly(
     theo LOẠI SỰ KIỆN (8 category) ở kia — hai trục khác nhau, hai file khác
     nhau.
     """
-    p = Path(path)
+    p = resolve_data_path(path)
     if not p.exists():
         raise FileNotFoundError(_AI_GPR_MISSING_MSG.format(path=path))
     df = pd.read_csv(p)
@@ -1140,6 +1255,9 @@ def build_monthly_panel(
     battery: bool = False,
     shock_axis: bool = False,
     components: bool = False,
+    dual_component: bool = False,
+    shock_source: str = "gpr_ci",
+    ai_gpr_path: str = DEFAULT_AI_GPR_MONTHLY,
 ) -> pd.DataFrame:
     """Panel MONTHLY cho track monthly (docs/10 F3): GPR global + GPRC_<c>⊥ + macro.
 
@@ -1168,8 +1286,30 @@ def build_monthly_panel(
         van giu (ban cu, KHONG doi ten) va bang `GPR_INNOVATION`.
       - components=True: them truc shock cho GPR_ACT/GPR_THREAT (tach kenh tho
         giai doan 1, docs/11 §5.3 — khong can chan B). Chi co tac dung khi
-        shock_axis=True.
+        shock_axis=True (VOI truc 3 thuoc do) hoac dual_component=True.
+      - dual_component=True: them `GPR_ANTICIPATED`/`GPR_SURPRISE` — SPEC CHINH
+        cua docs/17_master_plan.md §4.1 (spec kep, `DEC-2026-08-03-dual-component`).
+        Hai cot cong lai bang DUNG Δ LEVEL. Voi components=True them ca cap
+        cua GPR_ACT/GPR_THREAT (spec 4 regressor, §4.1).
+        ⚠️ Dua CA HAI vao cung mot hoi quy — dung chon mot. Va bao cao dong gop
+        phai CHUAN HOA (`shocks.standardized_contribution`): he so tho cua hai
+        cot nay khong so duoc, Var(ANT)/Var(SUR) ~0.1.
       - extra_monthly: cot monthly khac do caller cung cap — join theo thang.
+
+    `shock_source` — nguon chuoi GPR TOAN CAU (P1.3, docs/17_master_plan.md §6):
+      - "gpr_ci"  (mac dinh): GPR goc Caldara-Iacoviello tu `gpr_path`. Ban cu,
+        khong doi gi.
+      - "ai_gpr": AI-GPR monthly tu `ai_gpr_path` (AIGPR/AIGPR_ACT/AIGPR_THREAT
+        -> doi ten thanh GPR/GPR_ACT/GPR_THREAT de MOI cot phia sau giu nguyen
+        ten). Dung de chay bang γ ban thu hai cua Phase 1a va do attenuation
+        do sai so do.
+        ⚠️ Cot nuoc `GPRC_<c>` VAN lay tu `gpr_path` (file C-I): AI-GPR tach
+        nuoc nam o file RIENG (`ai_gpr_country_monthly.csv`) voi 4 vai tro, KHONG
+        phai cung schema — tron hai thu do vao day se lam λ doi nghia trong im
+        lang. Doi nguon λ la viec rieng, chua lam.
+        ⚠️ Hai nguon co PHAN PHOI khac han (sd 47.6 vs 61.5, autocorr 0.580 vs
+        0.754 tren mau chung 1985+ — `scripts/check_master_plan_claims.py`), nen
+        nguong/phan vi hieu chuan tren ban nay KHONG dung cho ban kia.
 
     ⚠️ `country`: doi nuoc KHONG doi bat cu gi khac trong panel — tang 1-2 la ENGINE
     generic (#8), chi tang 3 co params rieng nuoc. Dung cho Phase 1b (nuoc pilot).
@@ -1177,11 +1317,27 @@ def build_monthly_panel(
     Innovation monthly: AR(p) rolling, p chon BIC/dev-window (giong daily, nhung
     min_train nho hon vi mau thang it). Complete-case 1 lan.
     """
-    from .shocks import innovation
+    from .shocks import delta_decomposition, innovation
     from .tier3_country import orthogonalize
+
+    if shock_source not in SHOCK_SOURCES:
+        raise ValueError(
+            f"shock_source={shock_source!r} khong thuoc {SHOCK_SOURCES}.")
 
     gpr_m = load_gpr_monthly(gpr_path, country=country,
                              components=components)          # GPR, GPRC_<c> (tho)
+    if shock_source == "ai_gpr":
+        # Thay CHUOI TOAN CAU bang AI-GPR; giu nguyen cot nuoc cua file C-I
+        # (xem canh bao o docstring — AI-GPR tach nuoc o file khac, schema khac).
+        ai = load_ai_gpr_monthly(ai_gpr_path)
+        rename = {"AIGPR": "GPR", "AIGPR_ACT": "GPR_ACT", "AIGPR_THREAT": "GPR_THREAT"}
+        ai = ai[[c for c in rename if c in ai.columns]].rename(columns=rename)
+        keep = [c for c in gpr_m.columns if c.startswith("GPRC_")]
+        gpr_m = ai.join(gpr_m[keep], how="inner")
+        gpr_m.attrs["shock_source"] = "ai_gpr"
+        gpr_m.attrs["ai_gpr_vintage"] = ai_gpr_vintage(ai_gpr_path)
+    else:
+        gpr_m.attrs["shock_source"] = "gpr_ci"
     gpr_m = gpr_m.loc[start:end] if end else gpr_m.loc[start:]
     country_col = f"GPRC_{country}"
 
@@ -1221,6 +1377,13 @@ def build_monthly_panel(
                 gpr_m[name], prefix=prefix, min_train=min_train,
                 max_order=max_order)
             frames.append(align_monthly_gpr_to_information_time(axis))
+    if dual_component:
+        # Spec CHINH docs/17_master_plan.md §4.1. Di cung duong information-time
+        # nhu moi thuoc do khac — thang M chi dung o bucket M+1.
+        for name in ["GPR", *(["GPR_ACT", "GPR_THREAT"] if components else [])]:
+            comp = delta_decomposition(gpr_m[name].rename(name),
+                                       min_train=min_train, max_order=max_order)
+            frames.append(align_monthly_gpr_to_information_time(comp))
     if freight:
         fr_raw = load_freight_monthly(start, end, cache_dir, refresh)
         frames.append(transform_freight(fr_raw))

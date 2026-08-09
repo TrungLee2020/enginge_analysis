@@ -14,7 +14,7 @@ Theo channel (khi co S-GPR): chay rieng shock kenh energy vs trade -> γ khac nh
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 import pandas as pd
 
@@ -36,6 +36,7 @@ def estimate_tier2(
     df: pd.DataFrame,
     macro_vars: Iterable[str] = DEFAULT_MACRO,
     shocks: Iterable[str] = DEFAULT_SHOCKS,
+    shock_groups: Iterable[Sequence[str]] | None = None,
     controls: Iterable[str] = (),
     horizons: Iterable[int] = range(0, 31),
     macro_lags: int = 1,
@@ -68,16 +69,52 @@ def estimate_tier2(
     giua hai cot giong het nhau va SE mat y nghia. Dieu chinh so lag bang `lags`,
     khong bang `macro_lags`.
 
+    shock_groups — NHIEU regressor trong CUNG mot hoi quy (P1.4)
+    ------------------------------------------------------------
+    `shocks` chay MOI thuoc do mot hoi quy rieng, va chi bao cao he so cua dung
+    thuoc do do. Spec CHINH cua docs/17_master_plan.md §4.1 (spec kep) can dieu
+    khac: ANTICIPATED va SURPRISE phai vao CUNG mot hoi quy va CA HAI he so deu
+    duoc bao cao. Truoc P1.4 dieu do khong lam duoc — regressor thu hai chi co
+    the nhet vao `controls` va he so cua no bi VUT.
+
+        estimate_tier2(panel, shock_groups=[["GPR_ANTICIPATED", "GPR_SURPRISE"]])
+
+    Moi nhom -> MOT hoi quy; moi thanh vien nhom -> mot hang ket qua, phan biet
+    bang cot `spec` (= "A+B"). He so cua control/lag augmentation KHONG duoc tra
+    ve: chung la nuisance, doc nhu γ la sai.
+
+    Hai cot CHI co o nhanh nay: `sd_regressor` va `beta_standardized` (= β×sd).
+    Bat buoc vi trong mot hoi quy nhieu regressor, cac regressor co phuong sai
+    khac han nhau — Var(ANTICIPATED)/Var(SURPRISE) ~0.1 tren chuoi sai phan, va
+    E2 do duoc 48.9% o DAO CHIEU ket luan khi doc he so tho thay vi chuan hoa.
+    Bao cao so tho o day roi so sanh chung la lap lai dung tai nan thang do ma
+    registry da ghi cho LEVEL+JUMP.
+
+    Dung duoc DONG THOI voi `shocks` (hai nhanh gop vao cung mot bang ket qua).
+
     Returns
     -------
     DataFrame long: [macro_var, shock, horizon, beta, se, tstat, pvalue,
                      ci_low, ci_high, nobs] (+ ci_low_supt/ci_high_supt/supt_c
-    khi simultaneous=True). beta = γ (impulse response).
+    khi simultaneous=True; + spec/sd_regressor/beta_standardized khi dung
+    `shock_groups`). beta = γ (impulse response).
     """
     macro_vars = list(macro_vars)
     shocks = list(shocks)
+    groups = [list(g) for g in (shock_groups or [])]
     controls = list(controls)
     horizons = list(horizons)
+
+    if not shocks and not groups:
+        raise ValueError("Phai co it nhat mot trong `shocks` / `shock_groups`.")
+    for g in groups:
+        if len(g) < 2:
+            raise ValueError(
+                f"shock_groups={g!r}: mot NHOM phai co >=2 regressor (muc dich la "
+                "dua chung vao CUNG mot hoi quy). Mot regressor thi dung `shocks`.")
+        if len(set(g)) != len(g):
+            raise ValueError(f"shock_groups={g!r}: trung ten regressor -> cot trung "
+                             "khit, X'X suy bien, SE vo nghia.")
 
     if inference == "lag_augmented" and macro_lags:
         raise ValueError(
@@ -113,9 +150,39 @@ def estimate_tier2(
             irf.insert(0, "macro_var", M)
             frames.append(irf)
 
+        for group in groups:
+            missing_g = [c for c in group if c not in work.columns]
+            if missing_g:
+                raise KeyError(f"shock_groups: cot khong co trong df: {missing_g}")
+            head, rest = group[0], list(group[1:])
+            irf = run_local_projection(
+                work, y=M, shock=head,
+                controls=[*rest, *controls, *lag_cols],
+                horizons=horizons,
+                inference=inference, lags=lags, simultaneous=simultaneous,
+                method=method, tau=tau, ci=ci, n_sim=n_sim, seed=seed,
+                return_all=True,
+            )
+            # Chi giu he so cua CAC REGRESSOR TRONG NHOM. Cot lag augmentation
+            # va control la nuisance — doc chung nhu β/θ la sai (CLAUDE.md, ghi
+            # chu `role="lag_augmentation"` cua tier3).
+            irf = irf[irf["term"].isin(group)].copy()
+            irf.insert(0, "spec", "+".join(group))
+            irf = irf.rename(columns={"term": "shock"})
+            irf.insert(0, "macro_var", M)
+            # β CHUAN HOA — bat buoc khi trong mot hoi quy co nhieu regressor
+            # khac phuong sai (docs/17_master_plan.md §4.1: Var(ANT)/Var(SUR)~0.1,
+            # E2 do 48.9% o dao chieu ket luan neu doc he so tho).
+            sd = {c: float(work[c].std()) for c in group}
+            irf["sd_regressor"] = irf["shock"].map(sd)
+            irf["beta_standardized"] = irf["beta"] * irf["sd_regressor"]
+            frames.append(irf)
+
     out = pd.concat(frames, ignore_index=True)
-    cols = BASE_COLS + [c for c in SUPT_COLS if c in out.columns]
-    return out[cols]
+    base = BASE_COLS if not groups else ["spec", *BASE_COLS,
+                                         "sd_regressor", "beta_standardized"]
+    cols = [c for c in base if c in out.columns]
+    return out[cols + [c for c in SUPT_COLS if c in out.columns]]
 
 
 def global_macro_impact_index(irf: pd.DataFrame, shock: str = "GPRD") -> pd.DataFrame:
