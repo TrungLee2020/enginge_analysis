@@ -203,14 +203,15 @@ Hai chỉ số **tách bạch, không trộn**. Zero-shot, JSON structured, cắ
 
 Việc **thật sự** còn lại:
 
-- [ ] **P1.0 — sửa đường dẫn.** Loader mặc định trỏ `data/ai_gpr_data_daily.csv`, `data/data_gpr_daily_recent.xls`; repo đang có `data/AI-GPRs/…` và `data/GPR index/data_gpr_daily_recent (1).xls`. Hiện **không script nào chạy được ngay** (§C5).
-- [ ] **P1.1 — chạy lại E2 trên AI-GPR.** E2 tự ghi đây là việc để khép lại, và §4.3 vừa cho thấy lối thoát "AI-GPR dai hơn" không áp dụng với mốc GPRD. Kết quả quyết định cách đọc §4.1.
-- [ ] **P1.2 — hiệu chuẩn lại phân vị/JUMP trên AI-GPR**, gồm xử lý zero-inflation kênh energy (§4.3).
-- [ ] **P1.3 — code: cho `build_monthly_panel()` đổi được NGUỒN shock** (GPR gốc ↔ AI-GPR). Hiện hard-code file xls (§C2). Không có cái này thì "chạy ba bản" của 1a không thực hiện được.
-- [ ] **P1.4 — code: trả về đủ hệ số cho spec đa regressor.** `estimate_tier2()` chỉ báo cáo hệ số của `shock`; ANTICIPATED+SURPRISE (và spec 4 regressor threat/act) cần `return_all=True` nối xuyên qua tier2, kèm `supt_c` riêng từng hệ số (§C3).
-- [ ] **P1.5 — code: cột ANTICIPATED/SURPRISE vào panel.** `delta_decomposition` đã có nhưng chưa được builder nào gọi; `components=True` hiện là act/threat, không phải cặp phân rã (§C4).
-- [ ] **1a**: tier2 tháng, spec phân rã kép, threats/acts, Oil×vùng, quantile, sup-t (theo ràng buộc §4.4), h=0..24. Ba bản: **GPR gốc · AI-GPR · IV/factor (robustness, §3.1)**. Battery EPU (+ WUI nếu tải được file).
-- [ ] **1b**: cascade tier3 end-to-end, nhãn PLUMBING. ⛔ **Chốt nguồn WIG/IPSA trước** — `pilot_market_series_missing` đang mở, không có FRED.
+- [x] **P1.0 — sửa đường dẫn** ✅ 2026-08-08. `data_files.resolve_data_path()` — loader tự tìm trong `data/AI-GPRs/` + `data/GPR index/`, khớp cả bản sao ` (1)`. Trước đó `tests/test_report_guard_p1.py` FAIL vì không mở được file. `DEFAULT_GPR_MONTHLY` → vintage `202608` (kiểm trước khi đổi: giống bản `(1)` từng ô trên 112 cột số).
+- [ ] **P1.1 — chạy lại E2 trên AI-GPR.** E2 tự ghi đây là việc để khép lại, và §4.3 vừa cho thấy lối thoát "AI-GPR dai hơn" không áp dụng với mốc GPRD. ⚠️ **Chặn bởi môi trường**: cần outcome vĩ mô thật từ FRED, mà `fred.stlouisfed.org` bị chặn ở egress policy sandbox (403 CONNECT). Chạy được ở máy có mạng.
+- [ ] **P1.2 — hiệu chuẩn lại phân vị/JUMP trên AI-GPR**, gồm xử lý zero-inflation kênh energy (§4.3). Ngưỡng q95/q99/sd của chuỗi shock nay đã được `scripts/publish_params.py` ghi vào `artifact.percentiles` — việc còn lại là hiệu chuẩn JUMP và trigger.
+- [x] **P1.3 — panel đổi được NGUỒN shock** ✅ 2026-08-08. `build_monthly_panel(shock_source="ai_gpr")`, giữ nguyên tên cột. Cột nước `GPRC_<c>` vẫn từ file C-I (AI-GPR tách nước ở file riêng, khác schema).
+- [x] **P1.4 — trả về đủ hệ số cho spec đa regressor** ✅ 2026-08-08. `estimate_tier2(shock_groups=[[...]])` — nhiều regressor trong CÙNG một hồi quy, báo cáo hệ số của mọi thành viên, lọc bỏ control/lag augmentation, kèm `sd_regressor` + `beta_standardized` bắt buộc.
+- [x] **P1.5 — cột ANTICIPATED/SURPRISE vào panel** ✅ 2026-08-08. `build_monthly_panel(dual_component=True)`; với `components=True` đủ spec 4 regressor.
+- [x] **P1.6 — ParamsArtifact** ✅ 2026-08-08 (hạng mục §1 của `docs/18_build_spec.md`). `src/gpr_engine/params/` + `scripts/publish_params.py` + `gamma_lookup.gamma_from_artifact()`. Gỡ hai khớp nối lỏng: online không còn đọc "file mới nhất khớp glob", và `standardized` lấy từ `beta_standardized` có sẵn thay vì trả β thô khi không có panel.
+- [ ] **1a**: tier2 tháng, spec phân rã kép, threats/acts, Oil×vùng, quantile, sup-t (theo ràng buộc §4.4), h=0..24. Ba bản: **GPR gốc · AI-GPR · IV/factor (robustness, §3.1)**. Battery EPU (+ WUI nếu tải được file). Đường ống đã thông (`publish_params.py`); ⚠️ **chặn bởi FRED** như P1.1.
+- [ ] **1b**: cascade tier3 end-to-end, nhãn PLUMBING. ⛔ **Chốt nguồn WIG/IPSA trước** — `pilot_market_series_missing`, không có trên FRED.
 - [ ] Registry: spec phân rã kép làm ô chính **cần chữ ký MỚI** (§7 #2); ba thước đo cũ → robustness. `vn_market_series_missing` **đã có sẵn**, không phải thêm.
 
 **⛔ Cổng:** bảng γ tồn tại · cascade chạy hết · độ lớn effect thật được ghi (đầu vào cho mọi câu hỏi power sau).

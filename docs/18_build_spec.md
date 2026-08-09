@@ -63,7 +63,7 @@ Layout v1.0 gọn hơn thật. Nhưng bảng dưới là đối chiếu từng d
 | `econometrics/panel_var.py` 🔴 stub | `granger_block_test()` đã thực thi | ✅ **không phải stub** |
 | — (không nhắc) | **Stub thật**: `econometrics/{surprise,tvp_var}`, `indices/{builder,divergence}`, `backtest/*` — raise ngay khi import | 🔴 6 module |
 | `serving/api.py` ★ | không có FastAPI ở đâu trong repo | 🔴 **thiếu thật** |
-| `params/` ★ | không có | 🔴 **thiếu thật, ưu tiên 1** |
+| `params/` ★ | ✅ **đã viết 2026-08-08**: `params/{schema,artifact}.py` + `scripts/publish_params.py` + `gamma_lookup.gamma_from_artifact()` | ✅ xong |
 | `econometrics/measurement_error.py` ★ | không có | 🔴 thiếu thật (nhưng xuống robustness — `docs/17_master_plan.md` §3.1) |
 | `scoring/tier_a.py` ★ | không có (tầng A replication chưa làm) | 🔴 thiếu thật |
 | `scoring/audit.py` ★ | không có | 🔴 thiếu thật |
@@ -82,9 +82,11 @@ Lý do không gộp hai bước: `CLAUDE.md` §"Bản đồ code" là ngữ cả
 
 ## 3. INTERFACE CHÍNH — MỘT LỖI PHẢI SỬA TRƯỚC KHI CODE
 
+**Đã code 2026-08-08** tại `src/gpr_engine/params/schema.py` — dùng `dataclass` chứ không `BaseModel`: pydantic chỉ có mặt như phụ thuộc **gián tiếp** của `openai`, và repo dùng dataclass ở mọi chỗ khác (`Statement`, `GammaCell`, `AnalogueResult`). `validate()` kiểm tay đúng những điều cần kiểm — gồm cả thứ pydantic không biết (chữ ký đã ký, trần claim theo tầng, quan hệ giữa `tau` và `ci_kind`).
+
 ```python
-# params/schema.py
-class Tier2Params(BaseModel):
+# params/schema.py — bản đã code
+class Tier2Params:
     horizon: int
     component: Literal["anticipated", "surprise"]   # ⚠️ KHÔNG PHẢI ["persistent","shock"]
     shock_measure: str          # 'AIGPR' | 'GPRD' | 'GPRD_ACT'... — chuỗi nào làm shock
@@ -165,19 +167,19 @@ def enforce(narrative: str, payload: dict) -> str:
 
 | # | Việc | File | Ghi chú so với v1.0 |
 |---|---|---|---|
-| 0 | **Sửa đường dẫn data** (`data/AI-GPRs/…`, `data/GPR index/… (1).xls` vs DEFAULT_*) | `econometrics/data_files.py` | **thêm mới** — hiện không script nào chạy được ngay |
+| 0 | **Sửa đường dẫn data** | `econometrics/data_files.py` | ✅ **xong 2026-08-08** — `resolve_data_path()`, 14 test |
 | 1 | ~~`load_ai_gpr()` + 5 subindices + vintage~~ | — | ✅ **đã xong**, gạch |
 | 2 | ~~`decompose()`~~ | — | ✅ **đã xong** (`delta_decomposition`) |
 | 3 | Hiệu chuẩn phân vị/JUMP trên AI-GPR, **có xử lý zero-inflation** (`GPR_OIL` = 0 ở 31.8% ngày, theo vùng tới 99.7%) | `econometrics/shocks.py` | giữ, thêm ràng buộc |
 | 3b | **Chạy lại E2 trên AI-GPR** | `scripts/run_e2_component_check.py` | **thêm mới** — quyết định cách đọc spec kép, xem `docs/17_master_plan.md` §A4 |
-| 4 | Panel đổi được **nguồn shock** (GPR gốc ↔ AI-GPR) | `econometrics/data_files.py` | **thêm mới** — hiện hard-code file xls, không có tham số |
-| 5 | tier2 trả **đủ hệ số** của spec đa regressor (`return_all=True` xuyên qua, `supt_c` riêng từng hệ số) | `econometrics/tier2_global_macro.py` | **thêm mới** — hiện chỉ trả hệ số của một `shock`, regressor thứ hai rơi vào `controls` và **bị vứt** |
-| 6 | Cột ANTICIPATED/SURPRISE vào panel | `econometrics/data_files.py` | **thêm mới** — `components=True` hiện là act/threat, không phải cặp phân rã |
+| 4 | Panel đổi được **nguồn shock** (GPR gốc ↔ AI-GPR) | `econometrics/data_files.py` | ✅ **xong 2026-08-08** — `shock_source=` |
+| 5 | tier2 trả **đủ hệ số** của spec đa regressor | `econometrics/tier2_global_macro.py` | ✅ **xong 2026-08-08** — `shock_groups=`, kèm `sd_regressor`/`beta_standardized` bắt buộc |
+| 6 | Cột ANTICIPATED/SURPRISE vào panel | `econometrics/data_files.py` | ✅ **xong 2026-08-08** — `dual_component=` |
 | 7 | IV / common factor | `econometrics/measurement_error.py` ★ | **xuống robustness** (`docs/17_master_plan.md` §3.1: corr monthly 0.853, không phải 0.69) |
 | 8 | `run_t2_full.py` chạy 3 bản → bảng γ | `scripts/` | giữ |
 | 9 | cascade tier3 nước pilot, nhãn PLUMBING | `scripts/run_tier3.py` | ⛔ **chốt nguồn WIG/IPSA trước** — `pilot_market_series_missing`, không có trên FRED |
-| 10 | `ParamsArtifact` + `publish_params.py` | `params/` ★ | giữ — **hạng mục giá trị nhất của doc này** |
-| 11 | `gamma_lookup` đọc **artifact**, không đọc glob file mới nhất | `pipeline/gamma_lookup.py` | **thêm mới** — nếu bỏ, §1 chỉ tồn tại trên giấy |
+| 10 | `ParamsArtifact` + `publish_params.py` | `params/` | ✅ **xong 2026-08-08** — 23 test. Lưu `tier2.csv`+`meta.json` (không parquet: `pyarrow` không có trong deps, và CSV diff được trong review) |
+| 11 | `gamma_lookup` đọc **artifact**, không đọc glob file mới nhất | `pipeline/gamma_lookup.py` | ✅ **xong 2026-08-08** — `gamma_from_artifact()`. Đường cũ `load_published_gamma` giữ nguyên cho script demo, không xoá |
 
 **Done khi:** `params/v2026-08-a/` tồn tại, `lookup()` trả số thật, `validate()` pass, **và** `gamma_lookup` không còn đọc `docs/reports/data/*.csv` theo glob.
 

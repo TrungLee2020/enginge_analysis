@@ -23,8 +23,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..scoring.statement_scorer import COMMITMENTS
+from ..params.schema import ParamsArtifact
 from ..reporting.composer import GammaCell
+from ..scoring.statement_scorer import COMMITMENTS
 
 DEFAULT_REPORTS_DIR = Path("docs/reports")
 DEFAULT_GAMMA_GLOB = "data/t2_full_holm_*.csv"
@@ -66,6 +67,55 @@ def _latest_gamma_file(reports_dir: Path, glob_pattern: str) -> Path:
     # kịch bản dữ liệu GPR mới về định kỳ) — sắp theo `st_mtime` (thời điểm
     # sửa file gần nhất) mới đúng nghĩa "mới nhất".
     return max(files, key=lambda p: p.stat().st_mtime)
+
+
+def gamma_from_artifact(
+    art: ParamsArtifact,
+    outcomes: set[str] | None = None,
+    *,
+    shock_variant: str | None = None,
+    component: str | None = None,
+    require_holm: bool = True,
+    alpha: float = 0.10,
+) -> tuple[list[GammaCell], str]:
+    """O gamma lay tu ARTIFACT co version — duong ONLINE dung cai nay.
+
+    Khac `load_published_gamma` o dung hai diem, va do la ca ly do ton tai
+    (`docs/18_build_spec.md` §1):
+
+    1. `data_version` tra ve la `<version>@<data_version>` cua artifact, KHONG
+       phai ten file bat duoc theo glob. Hai nhan dinh cach nhau mot tuan truy
+       nguoc ve dung mot bo tham so, ke ca khi research da chay lai o giua.
+    2. `standardized` lay tu `beta_standardized` co san trong artifact. Duong cu
+       voi `panel=None` tra `standardized = beta` (KHONG chuan hoa) trong khi
+       `DEC-2026-08-03-dual-component` bat buoc chuan hoa — o day khong con phai
+       chon giua "dung panel FRED trong request" va "bao cao so tho".
+
+    KHONG fit gi, khong noi suy: `artifact.lookup` khong co o thi o do vang mat.
+    """
+    cells = []
+    for p in art.tier2:
+        if outcomes and p.outcome not in outcomes:
+            continue
+        if shock_variant is not None and p.shock_variant != shock_variant:
+            continue
+        if component is not None and p.component != component:
+            continue
+        survived = p.p_holm is not None and p.p_holm < alpha
+        if require_holm and not survived:
+            continue
+        label = p.outcome
+        detail = "·".join(x for x in (p.shock_measure, p.shock_variant, p.component)
+                          if x)
+        if detail:
+            label = f"{p.outcome} ({detail})"
+        cells.append(GammaCell(
+            outcome=label, horizon=p.horizon, beta=p.beta,
+            pvalue=p.pvalue if p.pvalue is not None else float("nan"),
+            standardized=p.beta_standardized,
+            survived_holm=survived, survived_battery=survived,
+            component=p.component))
+    return cells, f"{art.version}@{art.data_version}"
 
 
 def load_published_gamma(
