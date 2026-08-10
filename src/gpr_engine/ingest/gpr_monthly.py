@@ -14,6 +14,8 @@ import argparse
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from .versioning import add_version_args, apply_snapshot
+
 GLOBAL_SERIES = ["GPR", "GPRT", "GPRA", "GPRH", "GPRHT", "GPRHA"]
 
 # Độ trễ publish monthly — LỚN và dễ gây leakage hơn daily rất nhiều.
@@ -81,19 +83,23 @@ def upsert(long: pd.DataFrame, dsn: str) -> int:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--path", default="data/data_gpr_export_202607.xls")
+    # Vintage 2026-08 (file trong `data/GPR index/`, phu 1900-01..2026-07).
+    ap.add_argument("--path", default="data/GPR index/data_gpr_export_202608.xls")
     ap.add_argument("--dsn", required=True)
-    ap.add_argument("--source-version", default="gpr_export_202607")
-    ap.add_argument("--data-version", default="v1")
+    ap.add_argument("--source-version", default="gpr_export_202608")
+    add_version_args(ap)
     args = ap.parse_args()
 
     df = load_dataframe(args.path)
-    long = to_long(df, args.source_version, args.data_version)
-    n = upsert(long, args.dsn)
-    n_series = long["series_id"].nunique()
-    print(f"Upserted {n} rows across {n_series} series | "
+    long = to_long(df, args.source_version, args.running_version)
+    rep = apply_snapshot(long, args.dsn, prefix="gpr_monthly",
+                         description=f"GPR monthly {args.source_version}",
+                         mode=args.snapshot,
+                         running_version=args.running_version)
+    print(f"GPR monthly | {long['series_id'].nunique()} series | "
           f"range {long['date'].min()} -> {long['date'].max()} | "
           f"available_at = dau thang ke tiep +{PUBLISH_LAG_DAYS}d")
+    print(rep.summary())
 
 
 if __name__ == "__main__":

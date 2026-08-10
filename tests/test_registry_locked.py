@@ -47,6 +47,8 @@ LOCKED_DECISION_IDS = {
     "DEC-2026-08-02-sources-trading",
     "DEC-2026-08-03-dual-component",   # docs/16 §2.2, amend shock-axis (§9.1)
     "DEC-2026-08-05-event-type-channel",  # docs/16 Task 1, EVENT_TYPE_TO_CHANNEL
+    "DEC-2026-08-09-battery-control-form",  # run_t2_full.BATTERY_MODE = level_lags
+    "DEC-2026-08-09-policy-shock-control",  # bản battery c = b + cú sốc chính sách
 }
 REQUIRED_DECISION_FIELDS = {"id", "decided", "by", "what"}
 
@@ -256,6 +258,76 @@ def test_event_type_channel_decision_matches_code():
     assert EVENT_TYPE_TO_CHANNEL.get("terrorism") is None
     assert EVENT_TYPE_TO_CHANNEL.get("diplomatic_tension") is None
     assert EVENT_TYPE_TO_CHANNEL.get("other") is None
+
+
+def test_battery_control_form_decision_matches_code():
+    """Chữ ký DEC-2026-08-09-battery-control-form phải khớp code thật.
+
+    Chữ ký chốt DẠNG của biến kiểm soát (level_lags), số lag = LAGS của LP, và
+    cam kết giữ lại chế độ cũ làm robustness. Đổi `BATTERY_MODE` hay
+    `BATTERY_CONTROL_LAGS` mà không sửa chữ ký cùng commit = rút chữ ký ngầm.
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import run_t2_full as t2
+
+    dec = {d["id"]: d for d in _cfg().get("decisions", [])}[
+        "DEC-2026-08-09-battery-control-form"]
+    what = str(dec["what"])
+
+    assert t2.BATTERY_MODE == "level_lags", (
+        f"code dùng {t2.BATTERY_MODE!r} nhưng chữ ký chốt 'level_lags' — "
+        "sửa cả hai trong CÙNG COMMIT.")
+    assert t2.BATTERY_MODE in what
+    assert t2.BATTERY_CONTROL_LAGS == t2.LAGS, (
+        "điều kiện của chữ ký: số lag control = LAGS của LP, không phải tham số "
+        "tự do để dò.")
+    # Chế độ cũ phải còn dùng được — chữ ký cam kết giữ làm robustness.
+    assert "same_measure" in what
+    assert t2.battery_control_names("LEVEL", "b", "same_measure")
+
+
+def test_policy_shock_control_decision_matches_code():
+    """Chữ ký DEC-2026-08-09-policy-shock-control phải khớp code thật.
+
+    Ba thứ chữ ký cam kết, cả ba đều hỏng lặng nếu code trôi:
+      - bản c là SIÊU TẬP của b (nếu không, chênh lệch b→c không còn đọc được
+        là 'do thêm control này');
+      - a/b giữ nguyên định nghĩa (điều kiện để số cũ còn so được);
+      - `policy_surprise` trả NaN ngoài phạm vi có sự kiện (điền 0 cho giai đoạn
+        chưa thu thập là biến kiểm soát mang giá trị sai).
+    """
+    import sys
+
+    import pandas as pd
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import run_t2_full as t2
+
+    from gpr_engine.econometrics.policy_shock import policy_surprise
+
+    dec = {d["id"]: d for d in _cfg().get("decisions", [])}[
+        "DEC-2026-08-09-policy-shock-control"]
+    what = str(dec["what"])
+
+    assert t2.BATTERY_VERSIONS == ("a", "b", "c"), (
+        f"code có {t2.BATTERY_VERSIONS} nhưng chữ ký chốt a/b/c — sửa cả hai "
+        "trong CÙNG COMMIT.")
+    assert t2.POLICY_SHOCK_COL in what
+
+    b = set(t2.battery_control_names("LEVEL", "b"))
+    c = set(t2.battery_control_names("LEVEL", "c"))
+    assert b < c, "bản c phải là siêu tập của bản b"
+    assert t2.battery_control_names("LEVEL", "a") == [], "bản a phải không control"
+    assert len(c - b) == 1 + t2.BATTERY_CONTROL_LAGS
+
+    # Điều kiện NaN-ngoài-phạm-vi: 0 chỉ hợp lệ giữa sự kiện đầu và cuối.
+    y = pd.Series(range(40), index=pd.bdate_range("2026-01-01", periods=40),
+                  dtype=float)
+    s = policy_surprise(y, pd.DatetimeIndex([y.index[10], y.index[20]]))
+    assert s.iloc[0] != s.iloc[0], "trước sự kiện đầu phải là NaN"       # NaN
+    assert s.iloc[-1] != s.iloc[-1], "sau sự kiện cuối phải là NaN"
 
 
 def test_holm_families_match_report_axis():

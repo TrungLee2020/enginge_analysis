@@ -11,7 +11,10 @@ SPEC — moi dong duoi day la mot quyet dinh DA KY, khong phai lua chon cua runn
   - HO KIEM DINH = nhom outcome pre-register: docs/14 §6.6 = B
     (DEC-2026-08-02-holm-family). Holm trong ho, tai focal horizons da khoa.
   - FOCAL HORIZONS {1,2,6} thang: SCA-01.primary_cell.focal_horizons (khoa may).
-  - BATTERY a/b CUNG MAU + control DONG THUOC DO voi shock: docs/14 §2 1a.
+  - BATTERY a/b CUNG MAU. Dang control = `level_lags`:
+    DEC-2026-08-09-battery-control-form (sua cach thuc hien cua docs/14 §2 1a
+    muc 2; "same_measure" giu lam robustness). Ly do + so do duoc o docstring
+    `BATTERY_MODE`; danh doi GHI VAO report moi run.
 
 CHAY:
     python scripts/run_t2_full.py                 # day du (~vai phut)
@@ -47,9 +50,11 @@ from gpr_engine.econometrics.data_files import (  # noqa: E402
     freight_vintage,
     load_benchmark_monthly,
     real_macro_vintage,
+    transform_benchmark,
 )
 from gpr_engine.econometrics.multiplicity import (  # noqa: E402
     PREREGISTERED_OUTCOME_FAMILIES,
+    grid_null_check,
     holm_by_family,
 )
 from gpr_engine.econometrics.shock_axis import (  # noqa: E402
@@ -74,6 +79,62 @@ SEED = 0
 
 CHANNELS = {"pooled": "GPR", "act": "GPR_ACT", "threat": "GPR_THREAT"}
 BATTERY_CONTROLS = ("epu_us", "epu_global")
+
+# Ban battery:
+#   a = khong control
+#   b = EPU (bat dinh chinh sach)
+#   c = EPU + CU SOC chinh sach tien te (policy_shock.mp_surprise)
+#
+# Vi sao them ban c thay vi nhet vao ban b: ban b la cai da chay va da bao cao;
+# doi dinh nghia cua no lam moi so cu khong so duoc nua. Ban c la CHIEU MOI.
+#
+# Vi sao can: γ do "cu soc GPR -> vi mo toan cau", ma tin Fed day DUNG nhung bien
+# do (lai suat, DXY, VIX, dau). Thang nao co ca hai ma khong tach thi γ hut luon
+# phan cua Fed. EPU kiem soat BAT DINH chinh sach, KHONG kiem soat CU SOC chinh
+# sach — hai thu khac nhau.
+# ⚠️ Chi phi mau: mp_surprise bat dau 2003-01 (ngay cong bo statement som nhat
+# lay duoc), nen ban c keo CA panel ve 2003+. Mot mau duy nhat la dieu kien de
+# a/b/c so duoc — xem muc "Chi phi mau" trong report.
+BATTERY_VERSIONS = ("a", "b", "c")
+POLICY_SHOCK_COL = "mp_surprise"
+
+# So lag cua control khi BATTERY_MODE="level_lags". Dat bang LAGS cua LP de
+# control va shock cung do sau lag — khong phai tham so tu do de do.
+BATTERY_CONTROL_LAGS = LAGS
+
+# Dang dua battery EPU vao ban b:
+#   "same_measure": control di qua build_monthly_shock_axis, CUNG thuoc do voi
+#                   shock (docs/14 §2 1a). Hap thu ca JUMP phi tuyen. TON warm-up
+#                   -> mau 2007+.
+#   "level_lags":   control vao dang LEVEL + p lag. KHONG ton warm-up -> mau dai.
+#
+# Mac dinh la "level_lags". Ly do — DO tren du lieu that (2026-08-09, ca hai che
+# do chay tren cung `--start=1990-01-01`), khong phai suy doan:
+#   same_measure -> 231 thang, bat dau 2007-02, cot rang buoc
+#                   `epu_global_LEVEL_PLUS_JUMP`  (= dung mau cua T2_full_f2579b30928f)
+#   level_lags   -> 315 thang, bat dau 2000-02, cot rang buoc
+#                   `GPR_THREAT_LEVEL_PLUS_JUMP`
+#   => +84 thang (7 nam). Duong di cua cai cu: GEPUCURRENT bat dau 1997 ->
+#   build_monthly_shock_axis (INNOVATION min_train=60 + cua so JUMP) -> 2007;
+#   complete-case toan cuc keo CA panel theo. Mot bien KIEM SOAT robustness tieu
+#   7 nam du lieu cua bien CHINH.
+#
+# Diem quan trong sau khi doi (do duoc, khong doan): cot rang buoc CHUYEN sang
+#   JUMP cua CHINH truc shock. Nghia la phan 1990-2000 con mat KHONG phai loi cua
+#   control nua — do la chi phi NOI TAI cua thuoc do LEVEL+JUMP (cua so rolling
+#   tren GPR). Bo epu_global khoi battery cung KHONG lay lai duoc. Cai gia con lai
+#   thuoc ve truc shock, khong thuoc ve battery.
+#   So thang mat THAT do bang `sample_cost()` va in vao report moi run.
+#
+# Vi sao "level_lags" van tra loi duoc lo ngai dong-thuoc-do cua docs/14 §2 1a:
+#   INNOVATION(EPU) = LEVEL(EPU) − AR-fit(lag cua LEVEL(EPU)) — mot to hop TUYEN
+#   TINH cua {LEVEL(EPU), lag cua no}. Nen {LEVEL + p lag} CHUA TRON khong gian
+#   ma INNOVATION(EPU) chiem: hap thu it nhat bang, thuong nhieu hon.
+# Ngoai le trung thuc: JUMP = max(0, z − q95) la PHI TUYEN, KHONG nam trong span
+#   cua level+lag. O thuoc do LEVEL+JUMP, "level_lags" hap thu IT HON
+#   "same_measure". Danh doi da biet -> ghi thang vao report (`render_sample_
+#   section`), khong lang im.
+BATTERY_MODE = "level_lags"
 
 OUTCOME_LABEL = {
     "oil": "Δln Oil (Brent)", "dxy": "Δln DXY", "vix": "VIX (level)",
@@ -101,31 +162,183 @@ def _data_version(*paths: str) -> str:
     return h.hexdigest()[:12]
 
 
+def _spec_version() -> str:
+    """Bam SPEC cua run. Ten artifact = data_version + spec_version.
+
+    Vi sao can: `_data_version` chi bam FILE DU LIEU. Doi spec ma du lieu khong
+    doi (vd them ban battery c) thi tro ra DUNG mot ten -> `FileExistsError` o
+    report, nhung CSV thi da bi ghi de TRUOC do. Da xay ra that 2026-08-09: CSV
+    cua T2_full_3e1bd83a02b8 bi ghi de bang ket qua cua spec khac, con file .md
+    van mo ta spec cu — hai thu mau thuan nhau ma khong co canh bao nao.
+    Doi bat ky dong nao duoi day = ten artifact doi = khong the ghi de nham nua.
+    """
+    h = hashlib.sha256()
+    for part in (INFERENCE, str(LAGS), str(list(HORIZONS)), str(FOCAL_HORIZONS),
+                 str(TAUS), str(ALPHA), str(CI), str(SEED), BATTERY_MODE,
+                 str(BATTERY_CONTROL_LAGS), str(BATTERY_CONTROLS),
+                 str(BATTERY_VERSIONS), str(sorted(CHANNELS))):
+        h.update(part.encode("utf-8"))
+        h.update(b"\x1f")
+    return h.hexdigest()[:6]
+
+
 # ---------------------------------------------------------------------------
 # Panel
 # ---------------------------------------------------------------------------
-def build_panel(start: str, end: str | None, refresh: bool) -> pd.DataFrame:
-    """Panel thang: truc shock x 3 kenh + 8 outcome + battery DONG THUOC DO.
+def build_policy_shock_monthly(refresh: bool = False) -> pd.DataFrame | None:
+    """Cu soc chinh sach tien te theo THANG + lag, cho ban battery c.
 
-    Battery khong dung `battery=True` cua build_monthly_panel: cai do tra EPU o
-    LEVEL thoi. Rang buoc docs/14 §2 1a muc 2 doi control CUNG THUOC DO voi
-    shock — so LEVEL-control voi INNOVATION-shock se thoi phong phan "rieng cua
-    GPR". Nen dung day dung `build_monthly_shock_axis` cho ca EPU, roi moi
-    thuoc do dung control cua chinh no.
+    Ngay cong bo lay tu muc luc FOMC that (`ingest/fomc.py`), lai suat tu FRED.
+    Can mang; khong lay duoc thi tra None va ban c bi BO — ghi ra, khong lang le
+    chay tiep voi mot control rong.
+    """
+    try:
+        from pandas_datareader import data as pdr
+
+        from gpr_engine.econometrics.policy_shock import (
+            DEFAULT_YIELD_SERIES,
+            event_days,
+            policy_surprise,
+            to_monthly,
+        )
+        from gpr_engine.ingest.fomc import list_archive
+
+        rels = [r for r in list_archive(strict=False) if r.doc_type == "statement"]
+        for y in range(2000, dt.date.today().year + 1):
+            try:
+                rels += [r for r in list_archive(years=[y], strict=False)
+                         if r.doc_type == "statement"]
+            except Exception:                                   # noqa: BLE001, S112
+                continue
+        ev = event_days({r.published_at for r in rels})
+        y = pdr.DataReader(DEFAULT_YIELD_SERIES, "fred", "1999-01-01", None)
+        s = policy_surprise(y[DEFAULT_YIELD_SERIES].dropna(), ev)
+        m = to_monthly(s)[["mp_surprise"]]
+        for k in range(1, BATTERY_CONTROL_LAGS + 1):
+            m[f"{POLICY_SHOCK_COL}_L{k}"] = m[POLICY_SHOCK_COL].shift(k)
+        print(f"      cú sốc chính sách: {len(ev)} ngày công bố, "
+              f"{int((m[POLICY_SHOCK_COL] != 0).sum())} tháng có họp, "
+              f"{m.index.min().date()} → {m.index.max().date()}")
+        return m
+    except Exception as e:                                      # noqa: BLE001
+        print(f"      ⚠️ KHÔNG dựng được cú sốc chính sách ({type(e).__name__}: "
+              f"{str(e)[:80]}) → bỏ bản battery c")
+        return None
+
+
+def build_panel(start: str, end: str | None, refresh: bool,
+                battery_mode: str = BATTERY_MODE,
+                dropna: bool = True) -> pd.DataFrame:
+    """Panel thang: truc shock x 3 kenh + 8 outcome + battery.
+
+    Battery khong dung `battery=True` cua build_monthly_panel (cai do tra EPU o
+    LEVEL, khong lag). Dang control theo `battery_mode` — xem hang so o tren.
 
     Mot MAU DUY NHAT (complete-case toan bo) de moi o so sanh duoc: ban a vs b,
-    va ba thuoc do voi nhau. Chi phi: xem `sample_cost` trong report.
+    va ba thuoc do voi nhau. `dropna=False` tra ban CHUA complete-case, chi de
+    chan doan cot nao rang buoc dau mau (`sample_binding_report`) — khong duoc
+    dua thang vao uoc luong.
     """
+    if battery_mode not in ("same_measure", "level_lags"):
+        raise ValueError(
+            f"battery_mode la {battery_mode!r}; chi nhan 'same_measure'|'level_lags'.")
+
     raw = load_benchmark_monthly(start, end, refresh=refresh, wui_path=None)
-    axis = pd.concat(
-        [build_monthly_shock_axis(raw[c].dropna(), prefix=c) for c in raw.columns],
-        axis=1)
+
+    if battery_mode == "same_measure":
+        extra = pd.concat(
+            [build_monthly_shock_axis(raw[c].dropna(), prefix=c)
+             for c in raw.columns], axis=1)
+    else:
+        # LEVEL (cung phep bien doi log1p ma transform_benchmark dung) + p lag.
+        lvl = transform_benchmark(raw)
+        cols = [lvl.rename(columns={c: f"{c}_LEVEL" for c in lvl.columns})]
+        for k in range(1, BATTERY_CONTROL_LAGS + 1):
+            cols.append(lvl.shift(k).rename(
+                columns={c: f"{c}_LEVEL_L{k}" for c in lvl.columns}))
+        extra = pd.concat(cols, axis=1)
+
     # EPU thang M cung chi biet sau khi thang M ket thuc — align GIONG GPR, neu
     # khong thi control nhin truoc shock mot thang.
-    axis = align_monthly_gpr_to_information_time(axis)
+    extra = align_monthly_gpr_to_information_time(extra)
+
+    mp = build_policy_shock_monthly(refresh=refresh)
+    if mp is not None:
+        # KHONG align nhu EPU: cu soc chinh sach cua thang M duoc biet NGAY trong
+        # thang M (thi truong phan ung trong ngay cong bo). Day chinh la ly do no
+        # la bien kiem soat dung cho outcome cung thang.
+        extra = extra.join(mp, how="outer")
+
     return build_monthly_panel(
         start=start, end=end, refresh=refresh, shock_axis=True, components=True,
-        real_macro=True, freight=True, battery=False, extra_monthly=axis)
+        real_macro=True, freight=True, battery=False, extra_monthly=extra,
+        dropna=dropna)
+
+
+def battery_control_names(measure: str, battery: str,
+                          battery_mode: str = BATTERY_MODE) -> list[str]:
+    """Ten cot control cho ban battery. Mot cho duy nhat sinh ten — hai nhanh
+    uoc luong (OLS + phan vi) khong duoc tu ghep chuoi rieng."""
+    if battery == "a":
+        return []
+    if battery not in BATTERY_VERSIONS:
+        raise ValueError(f"battery={battery!r} khong thuoc {BATTERY_VERSIONS}")
+    if battery_mode == "same_measure":
+        cols = [f"{c}_{measure}" for c in BATTERY_CONTROLS]
+    else:
+        cols = ([f"{c}_LEVEL" for c in BATTERY_CONTROLS]
+                + [f"{c}_LEVEL_L{k}" for c in BATTERY_CONTROLS
+                   for k in range(1, BATTERY_CONTROL_LAGS + 1)])
+    if battery == "c":
+        # mp_surprise DA la mot innovation (thay doi trong ngay cong bo), khong
+        # bien doi them. Them lag cung do sau voi cac control khac.
+        cols += [POLICY_SHOCK_COL] + [
+            f"{POLICY_SHOCK_COL}_L{k}" for k in range(1, BATTERY_CONTROL_LAGS + 1)]
+    return cols
+
+
+# ---------------------------------------------------------------------------
+# Chan doan mau — chay TRUOC khi uoc luong
+# ---------------------------------------------------------------------------
+def sample_binding_report(panel: pd.DataFrame, top: int = 8) -> pd.DataFrame:
+    """Cot nao rang buoc dau mau. In TRUOC moi run, khong phai debug tool.
+
+    ⚠️ Goi tren panel CHUA dropna (`build_panel(..., dropna=False)`). Tren panel
+    da complete-case thi moi cot cung mot `first_valid` va bang nay vo nghia.
+
+    Complete-case toan cuc nghia la cot bat dau muon nhat quyet dinh mau cua
+    TAT CA cac o. Khong in cai nay ra thi mat 17 nam du lieu ma khong ai thay —
+    da xay ra that o T2_full_f2579b30928f.
+    """
+    rows = []
+    for c in panel.columns:
+        s = panel[c].dropna()
+        if s.empty:
+            rows.append({"column": c, "first_valid": None, "n_obs": 0})
+            continue
+        rows.append({"column": c,
+                     "first_valid": s.index.min().date().isoformat(),
+                     "n_obs": int(s.size)})
+    out = pd.DataFrame(rows).sort_values("first_valid", ascending=False,
+                                         na_position="first")
+    return out.head(top).reset_index(drop=True)
+
+
+def sample_cost(panel: pd.DataFrame, requested_start: str) -> dict:
+    """Bao nhieu thang bi mat so voi `--start`, va vi cot nao."""
+    binding = sample_binding_report(panel, top=1)
+    complete = panel.dropna(how="any")
+    actual = complete.index.min() if len(complete) else pd.NaT
+    req = pd.Timestamp(requested_start)
+    lost = 0 if pd.isna(actual) else max(
+        0, (actual.year - req.year) * 12 + (actual.month - req.month))
+    return {
+        "requested_start": req.date().isoformat(),
+        "actual_start": None if pd.isna(actual) else actual.date().isoformat(),
+        "months_lost": lost,
+        "binding_column": (binding.iloc[0]["column"] if len(binding) else None),
+        "binding_first_valid": (binding.iloc[0]["first_valid"] if len(binding) else None),
+    }
 
 
 def outcomes_present(panel: pd.DataFrame) -> dict[str, tuple[str, ...]]:
@@ -137,17 +350,24 @@ def outcomes_present(panel: pd.DataFrame) -> dict[str, tuple[str, ...]]:
 # ---------------------------------------------------------------------------
 # Uoc luong
 # ---------------------------------------------------------------------------
+def available_versions(panel: pd.DataFrame) -> tuple[str, ...]:
+    """Ban battery chay duoc tren panel nay. Ban c can cot cu soc chinh sach —
+    khong co thi BO ban c, khong im lang chay no voi control rong."""
+    return tuple(v for v in BATTERY_VERSIONS
+                 if v != "c" or POLICY_SHOCK_COL in panel.columns)
+
+
 def estimate_gamma(panel: pd.DataFrame, families: dict) -> pd.DataFrame:
     """Bang γ: measure x channel x outcome x battery x horizon, OLS + sup-t."""
+    versions = available_versions(panel)
     rows = []
     for measure in SHOCK_MEASURES:
         for chan, prefix in CHANNELS.items():
             shock = shock_column(prefix, measure)
             if shock not in panel.columns:
                 continue
-            for battery in ("a", "b"):
-                controls = ([f"{c}_{measure}" for c in BATTERY_CONTROLS]
-                            if battery == "b" else [])
+            for battery in versions:
+                controls = battery_control_names(measure, battery)
                 for fam, outs in families.items():
                     for out in outs:
                         irf = estimate_tier2(
@@ -181,14 +401,18 @@ def estimate_quantiles(panel: pd.DataFrame, families: dict,
     Chi chay kenh `pooled`: luoi day du (3 kenh x 5 tau) khong them thong tin
     cho cau hoi cua Phase 1a ("phan phoi dich chuyen hay day duoi") ma nhan 3
     lan chi phi. Pham vi nay GHI RA day, khong am tham thu hep.
+
+    Chi chay ban battery a/b, KHONG chay ban c: cau hoi cua ban c ("γ co song
+    sot khi kiem soat cu soc chinh sach khong") tra loi bang OLS la du; them mot
+    ban nua vao nhanh phan vi nhan 1.5 lan chi phi cham nhat cua run ma khong
+    doi cau tra loi. Pham vi ghi ra, khong am tham.
     """
     prefix = CHANNELS[channel]
     rows = []
     for measure in SHOCK_MEASURES:
         shock = shock_column(prefix, measure)
         for battery in ("a", "b"):
-            controls = ([f"{c}_{measure}" for c in BATTERY_CONTROLS]
-                        if battery == "b" else [])
+            controls = battery_control_names(measure, battery)
             for tau in TAUS:
                 for fam, outs in families.items():
                     for out in outs:
@@ -233,7 +457,8 @@ def apply_holm(gamma: pd.DataFrame, families: dict) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 def compute_stats(panel: pd.DataFrame, gamma: pd.DataFrame, holm: pd.DataFrame,
                   quant: pd.DataFrame | None, families: dict,
-                  elapsed: float) -> dict:
+                  elapsed: float, cost: dict | None = None,
+                  battery_mode: str = BATTERY_MODE) -> dict:
     surv = holm[holm["reject"]]
     surv_b = surv[surv["battery"] == "b"]
     stats = {
@@ -247,6 +472,10 @@ def compute_stats(panel: pd.DataFrame, gamma: pd.DataFrame, holm: pd.DataFrame,
         "n_focal_tests": int(len(holm)),
         "n_survive_holm": int(len(surv)),
         "n_survive_holm_battery": int(len(surv_b)),
+        # Ban c = EPU + cu soc chinh sach tien te. Con so dang doc nhat cua run
+        # nay: bao nhieu o song sot khi da tach phan do Fed gay ra.
+        "n_survive_holm_battery_c": int((surv["battery"] == "c").sum()),
+        "n_versions": int(holm["battery"].nunique()),
         "n_raw_sig": int((holm["pvalue"] < ALPHA).sum()),
         "alpha": ALPHA,
         "lags": LAGS,
@@ -289,6 +518,33 @@ def compute_stats(panel: pd.DataFrame, gamma: pd.DataFrame, holm: pd.DataFrame,
         stats["n_cells_all_three_measures"] = int((by_cell == len(SHOCK_MEASURES)).sum())
     else:
         stats["n_cells_all_three_measures"] = 0
+
+    # Doi chieu MUC LUOI: so bac bo tho vs ky vong duoi null toan cuc. Holm tra
+    # loi "o nao", cai nay tra loi "luoi co nhieu hon nhieu thuan khong" — hai
+    # cau hoi khac nhau, va o T2_full_f2579b30928f chung cho ket luan nguoc
+    # nhau (15 "song sot" nhung 34 < 43.2 ky vong).
+    chk = grid_null_check(holm["pvalue"], alpha=ALPHA)
+    stats.update({
+        "grid_n_tests": chk.n_tests,
+        "grid_expected": round(chk.expected, 1),
+        "grid_observed": chk.observed,
+        "grid_ratio": round(chk.ratio, 2),
+        "grid_z": round(chk.z_indep, 2),
+        "grid_verdict": chk.verdict,          # chuoi, khong phai so
+    })
+
+    # Chi phi mau + dang control battery — de report noi ra thay vi de im.
+    stats["battery_mode"] = battery_mode
+    stats["battery_control_lags"] = (BATTERY_CONTROL_LAGS
+                                     if battery_mode == "level_lags" else 0)
+    if cost is not None:
+        stats.update({
+            "sample_requested_start": cost["requested_start"],
+            "sample_actual_start": cost["actual_start"],
+            "sample_months_lost": cost["months_lost"],
+            "sample_binding_column": cost["binding_column"],
+            "sample_binding_first_valid": cost["binding_first_valid"],
+        })
     return stats
 
 
@@ -316,9 +572,9 @@ def gamma_table_md(holm: pd.DataFrame, battery: str, measure: str) -> str:
     return "\n".join(lines)
 
 
-def axis_summary_md(holm: pd.DataFrame) -> str:
+def axis_summary_md(holm: pd.DataFrame, battery: str = "b") -> str:
     """So o song sot Holm theo (thuoc do x ho) — doc truc SHOCK trong mot bang."""
-    sub = holm[holm["battery"] == "b"]
+    sub = holm[holm["battery"] == battery]
     fams = list(PREREGISTERED_OUTCOME_FAMILIES)
     lines = ["| Thước đo | " + " | ".join(FAMILY_LABEL[f] for f in fams) + " | Tổng |",
              "|---|" + "---|" * (len(fams) + 1)]
@@ -330,6 +586,80 @@ def axis_summary_md(holm: pd.DataFrame) -> str:
             tot += n
         lines.append(f"| {MEASURE_LABEL[m]} | " + " | ".join(cells) + f" | {tot} |")
     return "\n".join(lines)
+
+
+def render_grid_null_section(stats: dict, holm: pd.DataFrame) -> list[str]:
+    """Doi chieu muc luoi. DAT TREN bang Holm, khong phai duoi.
+
+    Thu tu quan trong: doc "15 o song sot" truoc roi moi doc "34 < 43.2" thi an
+    tuong dau da hinh thanh. Ket luan muc luoi phai den truoc ket luan muc o.
+
+    Guard P1: van xuoi doc tu `stats` (KHONG dung `GridNullCheck.to_markdown`,
+    ham do format tu truong cua chinh no nen nam ngoai payload cua runner).
+    Bang phu tra ve lam PHAN TU RIENG — guard soi van xuoi, bang la du lieu in
+    tu DataFrame; tron chung mot chuoi la guard soi ca bang.
+    """
+    parts = [
+        "## Đối chiếu mức lưới (đọc TRƯỚC bảng Holm)\n",
+        f"Toàn lưới có **{stats['grid_n_tests']}** kiểm định focal ở ngưỡng "
+        f"p<{stats['alpha']}. Kỳ vọng số bác bỏ **dưới null toàn cục**: "
+        f"**{stats['grid_expected']}**. Quan sát: **{stats['grid_observed']}** "
+        f"({stats['grid_ratio']}x kỳ vọng, z≳{stats['grid_z']:+.2f}).\n",
+        f"> {stats['grid_verdict']}\n",
+        "Holm trả lời *ô NÀO sống sót trong họ này*; con số trên trả lời *toàn "
+        "lưới có nhiều hơn nhiễu thuần không*. Họ Holm chỉ 4/3/1 outcome nên "
+        "ngưỡng nghiêm nhất là α/4 — gần như không phạt gì so với quy mô lưới. "
+        "z là **cận dưới** của |z| thật (kỳ vọng cộng tính bất kể tương quan, "
+        "chỉ phương sai mới phình) — đọc dấu và độ lớn xấp xỉ, không phải p-value.\n",
+    ]
+    if "battery" in holm.columns:
+        rows = []
+        for b, sub in holm.groupby("battery"):
+            c = grid_null_check(sub["pvalue"], alpha=stats["alpha"])
+            rows.append(f"| {b} | {c.n_tests} | {c.expected:.1f} | {c.observed} "
+                        f"| {c.ratio:.2f}x |")
+        parts.append("| Bản battery | n | Kỳ vọng null | Quan sát | Tỉ lệ |\n"
+                     "|---|---|---|---|---|\n" + "\n".join(rows) + "\n")
+        parts.append("Chênh lệch giữa hai bản đọc được ngay ở đây: bản a bác bỏ "
+                     "nhiều hơn hẳn bản b ⇒ phần 'riêng của GPR' chính là thứ "
+                     "battery hấp thụ.\n")
+    return parts
+
+
+def render_sample_section(stats: dict, binding: pd.DataFrame | None) -> list[str]:
+    """Chi phi mau — in ra de lan sau khong mat 10 nam ma khong ai thay."""
+    parts = ["## Chi phí mẫu (complete-case toàn cục)\n",
+             "\n".join([
+                 f"- `--start` yêu cầu: **{stats['sample_requested_start']}**",
+                 f"- mẫu thực tế: **{stats['sample_actual_start']}**",
+                 f"- **mất {stats['sample_months_lost']} tháng** vì cột "
+                 f"`{stats['sample_binding_column']}` (hợp lệ từ "
+                 f"{stats['sample_binding_first_valid']})",
+                 f"- `battery_mode` = `{stats['battery_mode']}`"
+                 + (f", số lag control = {stats['battery_control_lags']}"
+                    if stats["battery_control_lags"] else ""),
+             ]) + "\n"]
+    if binding is not None and len(binding):
+        rows = [f"| `{r['column']}` | {r['first_valid']} | {r['n_obs']} |"
+                for _, r in binding.iterrows()]
+        parts.append("Các cột bắt đầu muộn nhất (trước complete-case):\n")
+        parts.append("| Cột | Hợp lệ từ | n |\n|---|---|---|\n"
+                     + "\n".join(rows) + "\n")
+    if stats["battery_mode"] == "level_lags":
+        parts.append(
+            "> `level_lags`: control EPU vào dạng LEVEL + lag thay vì cùng thước "
+            "đo với shock. Span của {LEVEL, lag} chứa trọn INNOVATION (INNOVATION "
+            "là tổ hợp tuyến tính của chính LEVEL và lag của nó) nên hấp thụ "
+            "không kém hơn ở hai thước đo LEVEL/INNOVATION. **Đánh đổi**: JUMP là "
+            "phi tuyến, KHÔNG nằm trong span đó — ở thước đo LEVEL+JUMP, control "
+            "hấp thụ ÍT HƠN chế độ `same_measure`. Đọc kết quả LEVEL+JUMP bản b "
+            "với lưu ý này.\n")
+    else:
+        parts.append(
+            "> `same_measure`: control cùng thước đo với shock (docs/14 §2 1a). "
+            "Hấp thụ cả JUMP phi tuyến, nhưng tốn warm-up của shock-axis nên "
+            "mẫu bị cắt — xem số tháng mất ở trên.\n")
+    return parts
 
 
 def quantile_table_md(quant: pd.DataFrame, measure: str) -> str:
@@ -362,7 +692,8 @@ def quantile_table_md(quant: pd.DataFrame, measure: str) -> str:
 
 
 def build_report(stats: dict, holm: pd.DataFrame, gamma: pd.DataFrame,
-                 quant: pd.DataFrame | None, families: dict, meta: dict) -> list[str]:
+                 quant: pd.DataFrame | None, families: dict, meta: dict,
+                 binding: pd.DataFrame | None = None) -> list[str]:
     """Narrative. Guard P1: MOI so o day den tu `stats`/`meta`/bang — khong go tay."""
     p: list[str] = []
     p.append("# T2-full — Bảng γ tầng 2, track THÁNG (Phase 1a)\n")
@@ -389,6 +720,9 @@ def build_report(stats: dict, holm: pd.DataFrame, gamma: pd.DataFrame,
              f"freight=`{meta['freight_vintage']}` · benchmark=`{meta['benchmark_vintage']}`")
     p.append(f"- **thời gian chạy**: {stats['elapsed_sec']} giây\n")
 
+    if "sample_months_lost" in stats:
+        p.extend(render_sample_section(stats, binding))
+
     p.append("## Quyết định đã ký chi phối run này\n")
     p.append("| Quyết định | Nội dung | Hệ quả trong run |")
     p.append("|---|---|---|")
@@ -400,6 +734,17 @@ def build_report(stats: dict, holm: pd.DataFrame, gamma: pd.DataFrame,
     p.append("| `DEC-2026-08-02-holm-family` (docs/14 §6.6=B) | Họ = nhóm outcome "
              "pre-register | Holm trong họ, cỡ "
              + " / ".join(str(v) for v in family_sizes(families).values()) + " |")
+    p.append("| `DEC-2026-08-09-battery-control-form` | Dạng control battery = "
+             "`level_lags` (LEVEL + lag), sửa cách thực hiện của docs/14 §2 1a "
+             "mục 2; `same_measure` giữ làm robustness | run này dùng `"
+             + str(stats["battery_mode"]) + "`; lý do + đánh đổi ở mục "
+             "*Chi phí mẫu* |")
+    p.append("| `DEC-2026-08-09-policy-shock-control` | Bản battery c = b + CÚ SỐC "
+             "chính sách tiền tệ (`policy_shock.py`, proxy NGÀY: Δ lãi suất 2 năm "
+             "ngày công bố FOMC) + 6 lag; a/b giữ nguyên định nghĩa | chiều MỚI, "
+             "không sửa b nên số cũ vẫn so được. Trần claim `measurement`: gọi "
+             "\"policy-window surprise (daily proxy)\", KHÔNG gọi \"cú sốc chính "
+             "sách\" — chuẩn vàng là cửa sổ 30 phút, bản này dùng cả ngày |")
     p.append("")
 
     p.append("## Cổng eligibility (máy)\n")
@@ -410,6 +755,8 @@ def build_report(stats: dict, holm: pd.DataFrame, gamma: pd.DataFrame,
         p.append(f"| {MEASURE_LABEL[m]} | {'✅' if e.eligible else '❌'} | {e.reason} |")
     p.append("")
 
+    p.extend(render_grid_null_section(stats, holm))
+
     p.append("## Kết quả — số ô sống sót Holm (bản b: có battery EPU)\n")
     p.append(f"Một ô = một (outcome, horizon focal) tại h∈{list(FOCAL_HORIZONS)}, "
              f"kênh pooled+act+threat gộp lại; α={stats['alpha']}. "
@@ -417,8 +764,19 @@ def build_report(stats: dict, holm: pd.DataFrame, gamma: pd.DataFrame,
              f"{stats['n_raw_sig']} có p thô < {stats['alpha']}, "
              f"**{stats['n_survive_holm']}** sống sót Holm trong họ "
              f"(bản b: {stats['n_survive_holm_battery']}).\n")
-    p.append(axis_summary_md(holm))
+    p.append("**Bản b — control EPU (bất định chính sách):**\n")
+    p.append(axis_summary_md(holm, "b"))
     p.append("")
+    if stats["n_versions"] > 2:
+        p.append("**Bản c — EPU + CÚ SỐC chính sách tiền tệ:** "
+                 f"{stats['n_survive_holm_battery_c']} ô sống sót (bản b: "
+                 f"{stats['n_survive_holm_battery']}). Đây là con số đáng đọc "
+                 "nhất của run: tin Fed đẩy đúng những biến mà γ đo (lãi suất, "
+                 "DXY, VIX, dầu), nên ô nào biến mất khi thêm control này là ô "
+                 "vốn đang tính công của Fed cho GPR. EPU kiểm soát *bất định* "
+                 "chính sách, KHÔNG kiểm soát *cú sốc* chính sách.\n")
+        p.append(axis_summary_md(holm, "c"))
+        p.append("")
     p.append(f"**Đồng thuận qua trục SHOCK:** {stats['n_cells_all_three_measures']} ô "
              "(kênh, outcome, horizon) sống sót Holm ở **cả ba** thước đo. "
              "Đó là con số đáng đọc nhất của trục báo cáo: kết luận bền qua "
@@ -506,11 +864,20 @@ def main() -> None:
     args = ap.parse_args()
 
     t0 = time.time()
-    print("[1/5] Panel tháng (trục shock × 3 kênh + 8 outcome + battery đồng thước đo)...")
-    panel = build_panel(args.start, args.end, args.refresh)
+    print(f"[1/5] Panel tháng (trục shock × 3 kênh + 8 outcome + battery "
+          f"`{BATTERY_MODE}`)...")
+    # Dung ban CHUA complete-case de do chi phi mau, roi moi dropna. Xay dung
+    # mot lan: dropna sau la dung y nghia "mot mau duy nhat" nhu truoc.
+    raw_panel = build_panel(args.start, args.end, args.refresh, dropna=False)
+    panel = raw_panel.dropna()
+    cost = sample_cost(raw_panel, args.start)
+    binding = sample_binding_report(raw_panel, top=5)
     families = outcomes_present(panel)
     print(f"      {panel.shape[0]} tháng, {panel.index.min().date()} → "
           f"{panel.index.max().date()}, {panel.shape[1]} cột")
+    print(f"      chi phí mẫu: mất {cost['months_lost']} tháng so với "
+          f"{cost['requested_start']} — cột ràng buộc `{cost['binding_column']}` "
+          f"(hợp lệ từ {cost['binding_first_valid']})")
 
     print("[2/5] Ước lượng γ (OLS lag-augmented + sup-t)...")
     gamma = estimate_gamma(panel, families)
@@ -529,8 +896,8 @@ def main() -> None:
         print("[4/5] Bỏ qua phân vị (--no-quantile)")
 
     elapsed = time.time() - t0
-    stats = compute_stats(panel, gamma, holm, quant, families, elapsed)
-    dv = _data_version(DEFAULT_GPR_MONTHLY, DEFAULT_GPR_DAILY)
+    stats = compute_stats(panel, gamma, holm, quant, families, elapsed, cost=cost)
+    dv = f"{_data_version(DEFAULT_GPR_MONTHLY, DEFAULT_GPR_DAILY)}_{_spec_version()}"
     meta = {
         "data_version": dv,
         "git_commit": _git_commit(),
@@ -543,18 +910,32 @@ def main() -> None:
     }
 
     print("[5/5] Ghi report + CSV...")
-    DATADIR.mkdir(parents=True, exist_ok=True)
-    gamma.to_csv(DATADIR / f"t2_full_gamma_{dv}.csv", index=False)
-    holm.to_csv(DATADIR / f"t2_full_holm_{dv}.csv", index=False)
-    if quant is not None:
-        quant.to_csv(DATADIR / f"t2_full_quantile_{dv}.csv", index=False)
-
+    # Kiem VA CHAM TRUOC khi ghi bat cu gi. Ban cu kiem report SAU khi da ghi
+    # CSV, nen mot lan va cham lam CSV bi ghi de con .md thi giu nguyen — hai
+    # thu mau thuan nhau, khong canh bao. Da xay ra that 2026-08-09.
     out = REPORTS / f"T2_full_{dv}.md"
-    if out.exists():
+    csvs = {
+        "gamma": DATADIR / f"t2_full_gamma_{dv}.csv",
+        "holm": DATADIR / f"t2_full_holm_{dv}.csv",
+        **({"quantile": DATADIR / f"t2_full_quantile_{dv}.csv"}
+           if quant is not None else {}),
+    }
+    clash = [p for p in [out, *csvs.values()] if p.exists()]
+    if clash:
         raise FileExistsError(
-            f"{out} đã tồn tại — không ghi đè report cũ. Xóa CÓ CHỦ ĐÍCH rồi chạy lại.")
-    out.write_text("\n".join(build_report(stats, holm, gamma, quant, families, meta)),
-                   encoding="utf-8")
+            f"Artifact đã tồn tại, KHÔNG ghi đè: {[str(p) for p in clash]}. "
+            f"Tên mã hóa data_version + spec_version (`{dv}`) — trùng tên nghĩa "
+            "là cùng dữ liệu VÀ cùng spec, tức chạy lại y hệt. Xóa CÓ CHỦ ĐÍCH "
+            "rồi chạy lại nếu thật sự muốn.")
+
+    DATADIR.mkdir(parents=True, exist_ok=True)
+    gamma.to_csv(csvs["gamma"], index=False)
+    holm.to_csv(csvs["holm"], index=False)
+    if quant is not None:
+        quant.to_csv(csvs["quantile"], index=False)
+    out.write_text(
+        "\n".join(build_report(stats, holm, gamma, quant, families, meta, binding)),
+        encoding="utf-8")
     print(f"\nDONE ({stats['elapsed_sec']}s). → {out}")
 
 

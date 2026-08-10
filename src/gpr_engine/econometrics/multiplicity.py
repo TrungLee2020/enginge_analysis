@@ -27,6 +27,7 @@ bao tuong minh va ghi lai `family` trong ket qua de report truy duoc.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -152,3 +153,85 @@ def holm_by_family(
             out.loc[idx, col] = res[col].to_numpy()
         out.loc[idx, "family_size"] = int(res["pvalue"].notna().sum())
     return out
+
+
+# ---------------------------------------------------------------------------
+# Kiem dinh muc LUOI: quan sat co nhieu hon nhieu thuan khong?
+# ---------------------------------------------------------------------------
+# Holm o tren tra loi "o NAO song sot trong ho nay". No KHONG tra loi "toan bo
+# luoi co nhieu hon nhieu khong" — va hai cau hoi do cho ket luan nguoc nhau khi
+# so kiem dinh lon con co ho thi nho.
+#
+# Vi du that (T2_full_f2579b30928f): 432 kiem dinh focal, 34 co p tho < 0.10, 15
+# "song sot Holm". Nghe nhu 15 phat hien. Nhung duoi NULL TOAN CUC, so bac bo ky
+# vong o nguong 0.10 la 43.2 — quan sat 34 nam DUOI muc nhieu thuan sinh ra. Ho
+# Holm co 4/3/1 outcome nen nguong nghiem nhat chi la alpha/4; no gan nhu khong
+# phat gi so voi quy mo 432 kiem dinh cua luoi.
+#
+# E[bac bo] = n*alpha dung BAT KE cac kiem dinh tuong quan den dau (ky vong cong
+# tinh). Chi PHUONG SAI moi phinh theo tuong quan — nen z duoi day la CAN DUOI
+# cua |z| that, dung de doc dau va do lon xap xi, khong dung de bao cao p-value.
+@dataclass(frozen=True)
+class GridNullCheck:
+    """Doi chieu so bac bo tho voi ky vong duoi null toan cuc."""
+
+    n_tests: int
+    alpha: float
+    observed: int
+    expected: float
+    z_indep: float          # CAN DUOI cua |z| that (xem ghi chu tren)
+    ratio: float            # observed / expected
+
+    @property
+    def verdict(self) -> str:
+        if self.observed <= self.expected:
+            return ("DUOI ky vong null — luoi nhat quan voi KHONG co tac dong o "
+                    "dau ca. Khong duoc doc cac o song sot Holm nhu phat hien.")
+        if self.z_indep < 1.64:
+            return ("TREN ky vong null nhung trong khoang nhieu — chua tach duoc "
+                    "khoi null toan cuc.")
+        return ("TREN ky vong null ro ret — co tin hieu o muc luoi. Van phai xem "
+                "Holm de biet O NAO.")
+
+    def to_markdown(self) -> str:
+        """Render doc lap (notebook/script rieng).
+
+        ⚠️ Runner co Guard P1 tren `stats` (vd `scripts/run_t2_full.py`) thi
+        KHONG dung ham nay: dua cac truong o tren vao `stats` roi tham chieu,
+        khong thi guard mat hieu luc voi dung khoi so nay.
+        """
+        return (
+            f"**Kiem dinh muc luoi (null toan cuc):** {self.n_tests} kiem dinh o "
+            f"nguong p<{self.alpha:g}. Ky vong duoi null: **{self.expected:.1f}**. "
+            f"Quan sat: **{self.observed}** ({self.ratio:.2f}x, z≳{self.z_indep:+.2f}).\n\n"
+            f"> {self.verdict}\n"
+        )
+
+
+def grid_null_check(pvalues: Sequence[float], alpha: float = 0.10) -> GridNullCheck:
+    """So so bac bo tho voi n*alpha.
+
+    Goi tren TOAN BO p-value focal cua luoi (moi thuoc do, moi kenh, moi ban
+    battery, moi horizon focal) — khong phai tren mot ho.
+
+    >>> import numpy as np
+    >>> r = grid_null_check(np.full(432, 0.5), alpha=0.10)   # khong o nao bac bo
+    >>> r.observed, round(r.expected, 1)
+    (0, 43.2)
+    """
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha phai trong (0,1), nhan {alpha}")
+    p = pd.Series(pvalues, dtype=float).dropna().to_numpy()   # NaN = spec hong
+    n = int(p.size)
+    if n == 0:
+        raise ValueError("grid_null_check: khong co p-value nao.")
+    if ((p < 0) | (p > 1)).any():
+        raise ValueError("pvalues phai trong [0,1] — kiem lai da truyen dung cot chua.")
+    obs = int((p < alpha).sum())
+    exp = n * alpha
+    sd = float(np.sqrt(n * alpha * (1 - alpha)))
+    return GridNullCheck(
+        n_tests=n, alpha=alpha, observed=obs, expected=exp,
+        z_indep=(obs - exp) / sd if sd > 0 else 0.0,
+        ratio=obs / exp if exp > 0 else float("nan"),
+    )

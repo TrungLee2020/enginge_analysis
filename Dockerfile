@@ -6,7 +6,7 @@
 #   docker run --env-file .env gpr-engine
 # Chạy một script khác (vd ingest) — override CMD:
 #   docker run --env-file .env -v "$(pwd)/data:/app/data" gpr-engine \
-#       python -m gpr_engine.ingest.gpr_daily --path data/data_gpr_daily_recent.xls --dsn "$GPR_DB_DSN"
+#       python -m gpr_engine.ingest.gpr_daily --path "data/GPR index/data_gpr_daily_recent (1).xls" --dsn "$GPR_DB_DSN"
 #
 # Xem docker-compose.yml cho bộ chạy đầy đủ (Postgres + Kafka KRaft + app)
 # dùng khi phát triển/thử nghiệm cục bộ.

@@ -24,6 +24,8 @@ from typing import Callable
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from .versioning import add_version_args, apply_snapshot
+
 # series_id noi bo -> ma nguon. Giu series_id ngan, on dinh (dung trong econometrics).
 # FRED codes: https://fred.stlouisfed.org
 FRED_MAP: dict[str, str] = {
@@ -128,16 +130,28 @@ def available_at(dates: pd.Series) -> pd.Series:
             + pd.Timedelta(hours=CLOSE_HOUR_UTC)).dt.tz_localize("UTC")
 
 
+def to_long(long: pd.DataFrame, source: str, source_version: str = "",
+            data_version: str = "v1") -> pd.DataFrame:
+    """Them metadata chuan cho ext_series. Tach khoi `upsert` de duong vintage
+    (`versioning.apply_snapshot`) dung chung duoc mot ban dung."""
+    out = long.copy()
+    out["freq"] = "daily"
+    out["source"] = source
+    out["available_at"] = available_at(out["date"])
+    out["source_version"] = source_version or source
+    out["data_version"] = data_version
+    return out
+
+
 def upsert(long: pd.DataFrame, dsn: str, source: str,
            source_version: str = "", data_version: str = "v1") -> int:
+    """UPSERT tho vao MOT data_version (khong archive ban cu).
+
+    Giu lai cho tuong thich; duong chinh la `main()` -> `apply_snapshot`.
+    """
     if long.empty:
         return 0
-    long = long.copy()
-    long["freq"] = "daily"
-    long["source"] = source
-    long["available_at"] = available_at(long["date"])
-    long["source_version"] = source_version or source
-    long["data_version"] = data_version
+    long = to_long(long, source, source_version, data_version)
     engine = create_engine(dsn)
     sql = text("""
         INSERT INTO ext_series (series_id, date, value, freq, source,
@@ -161,7 +175,7 @@ def main():
                     help="series_id can tai; mac dinh theo source")
     ap.add_argument("--start", default="1990-01-01")
     ap.add_argument("--end", default=None, help="mac dinh: hom nay")
-    ap.add_argument("--data-version", default="v1")
+    add_version_args(ap)
     args = ap.parse_args()
 
     end = args.end or dt.date.today().isoformat()
@@ -172,13 +186,18 @@ def main():
     else:
         series_ids = list(FRED_MAP)
 
-    long = SOURCES[args.source](series_ids, args.start, end)
-    n = upsert(long, args.dsn, source=args.source, data_version=args.data_version)
-    if n:
-        print(f"Upserted {n} rows | source={args.source} | series={series_ids} | "
-              f"range {long['date'].min()} -> {long['date'].max()}")
-    else:
+    raw = SOURCES[args.source](series_ids, args.start, end)
+    if raw.empty:
         print(f"Khong co du lieu | source={args.source} | series={series_ids}")
+        return
+    long = to_long(raw, args.source, data_version=args.running_version)
+    rep = apply_snapshot(long, args.dsn, prefix=f"market_{args.source}",
+                         description=f"market data {args.source} {series_ids}",
+                         mode=args.snapshot,
+                         running_version=args.running_version)
+    print(f"market {args.source} | series={series_ids} | "
+          f"range {raw['date'].min()} -> {raw['date'].max()}")
+    print(rep.summary())
 
 
 if __name__ == "__main__":

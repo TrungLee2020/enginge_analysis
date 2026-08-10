@@ -20,8 +20,8 @@ Lượng tử hóa rủi ro địa chính trị từ tin tức/phát ngôn/sự 
 # 1. Postgres
 psql "$DSN" -f sql/001_schema_core.sql
 
-# 2. Ingest GPR daily (file đã có sẵn, 1985 -> 2026-06-29)
-python -m gpr_engine.ingest.gpr_daily --path data/data_gpr_daily_recent.xls --dsn "$DSN"
+# 2. Ingest GPR daily (file đã có sẵn, 1985 -> 2026-08-03)
+python -m gpr_engine.ingest.gpr_daily --path "data/GPR index/data_gpr_daily_recent (1).xls" --dsn "$DSN"
 
 # 3. Khám phá
 jupyter lab notebooks/01_explore.ipynb

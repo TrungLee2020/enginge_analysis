@@ -152,6 +152,103 @@ decisions:
       chỉ xác nhận Ý NGHĨA của mapping, chưa mở khóa việc dùng nó ở đâu.
     blocked_by: null
 
+  - id: DEC-2026-08-09-battery-control-form   # docs/14 §2 1a mục 2, sửa cách thực hiện
+    decided: "2026-08-09"
+    by: "user (yêu cầu 'cần bản giải quyết' sau khi áp patch battery, phiên 2026-08-09)"
+    what: >
+      Dạng CONTROL của bản battery b trong bảng γ tầng 2
+      (scripts/run_t2_full.py::BATTERY_MODE) = "level_lags": EPU vào hồi quy
+      dưới dạng LEVEL (log1p, cùng quy ước GPR) + 6 lag, GIỐNG NHAU ở cả ba
+      thước đo shock. Thay cho "same_measure" (control đi qua
+      build_monthly_shock_axis, cùng thước đo với shock). Chế độ "same_measure"
+      GIỮ LẠI trong code làm robustness, không xóa — đổi bằng một hằng số.
+    why: >
+      ĐO trên dữ liệu thật 2026-08-09 (hai chế độ, cùng --start=1990-01-01),
+      không phải suy đoán:
+        same_measure -> 231 tháng, bắt đầu 2007-02, cột ràng buộc
+                        epu_global_LEVEL_PLUS_JUMP (đúng mẫu của
+                        T2_full_f2579b30928f);
+        level_lags   -> 315 tháng, bắt đầu 2000-02, cột ràng buộc
+                        GPR_THREAT_LEVEL_PLUS_JUMP.
+      Chênh +84 tháng (7 năm). Đường đi của cái cũ: epu_global (GEPUCURRENT)
+      bắt đầu 1997 -> burn-in của build_monthly_shock_axis (INNOVATION
+      min_train=60 + cửa sổ JUMP) -> 2007; complete-case toàn cục kéo CẢ panel
+      theo. Một biến KIỂM SOÁT robustness tiêu 7 năm dữ liệu của biến CHÍNH.
+      Hợp lệ với tinh thần docs/14 §2 1a mục 2 vì INNOVATION(EPU) =
+      LEVEL(EPU) − AR-fit(các lag của LEVEL(EPU)) là tổ hợp TUYẾN TÍNH của
+      {LEVEL(EPU), lag của nó}, nên span của control chứa trọn không gian mà
+      INNOVATION(EPU) chiếm: hấp thụ ít nhất bằng, thường nhiều hơn.
+    conditions:
+      - "Số lag control = LAGS của LP (=6) — control và shock cùng độ sâu lag,
+         KHÔNG phải tham số tự do để dò. Cổng máy:
+         test_battery_control_lags_match_lp_lags."
+      - "ĐÁNH ĐỔI phải nằm trong report MỖI RUN: JUMP = max(0, z − q95) là PHI
+         TUYẾN, KHÔNG nằm trong span {LEVEL, lag} — ở thước đo LEVEL+JUMP,
+         level_lags hấp thụ ÍT HƠN same_measure. Cổng máy:
+         test_sample_section_records_battery_mode_tradeoff."
+      - "Chi phí mẫu phải ĐO và IN (sample_cost/sample_binding_report), không
+         suy đoán. Sau khi đổi, cột ràng buộc CHUYỂN sang JUMP của chính trục
+         shock (GPR_THREAT_LEVEL_PLUS_JUMP, 2000-02): phần 1990-2000 còn mất là
+         chi phí NỘI TẠI của thước đo LEVEL+JUMP, KHÔNG phải lỗi của control —
+         bỏ epu_global khỏi battery cũng không lấy lại được."
+      - "Bản a và bản b vẫn phải trên MỘT MẪU DUY NHẤT (complete-case toàn
+         cục) — điều kiện gốc của docs/14 §2 1a không đổi."
+    not_yet_decided: >
+      Chữ ký này KHÔNG đụng tới nội dung nào của SCA-01 (ô chính, trục shock,
+      họ Holm) — nó chỉ chốt dạng của biến kiểm soát. Kết quả γ chạy dưới
+      level_lags vẫn phải qua human review như mọi bảng γ khác.
+    blocked_by: null
+
+  - id: DEC-2026-08-09-policy-shock-control   # bản battery c
+    decided: "2026-08-09"
+    by: "user (chỉ đạo 'chốt thêm cái bạn nói đi', phiên 2026-08-09)"
+    what: >
+      Thêm bản battery THỨ BA vào bảng γ tầng 2
+      (scripts/run_t2_full.py::BATTERY_VERSIONS = a/b/c):
+        a = không control · b = EPU · c = EPU + CÚ SỐC chính sách tiền tệ.
+      Cú sốc chính sách = cột `mp_surprise` do `econometrics/policy_shock.py`
+      sinh: thay đổi lãi suất 2 năm (DGS2) TRONG NGÀY công bố FOMC, ngày công bố
+      lấy từ mục lục thật của Fed (`ingest/fomc.py`). Vào hồi quy ở dạng đương
+      thời (`mp_surprise`) + 6 lag (`mp_surprise_L1..L6`), cùng độ sâu lag với
+      các control khác.
+      Bản a và b GIỮ NGUYÊN định nghĩa cũ — đó là điều kiện để mọi số đã báo cáo
+      trước vẫn so sánh được; c là chiều MỚI, không phải sửa b.
+    why: >
+      γ ước lượng "cú sốc GPR → vĩ mô toàn cầu", nhưng tin Fed đẩy ĐÚNG những
+      biến đó (lãi suất, DXY, VIX, giá dầu). Tháng nào có cả cú sốc GPR lẫn công
+      bố FOMC mà không tách ra thì γ hút luôn phần do Fed gây ra. Battery EPU
+      kiểm soát BẤT ĐỊNH chính sách, KHÔNG kiểm soát CÚ SỐC chính sách — hai
+      construct khác nhau.
+      Đo trên dữ liệu thật (T2_full_3e1bd83a02b8_cb1a51, 309 tháng): số bác bỏ
+      thô so với kỳ vọng null là a 1.11x · b 0.88x · c 0.83x; ô sống sót Holm
+      8 (b) → 7 (c). Tức CÓ một phần γ đang tính công của Fed, nhưng nhỏ.
+    conditions:
+      - "TRẦN CLAIM `measurement`, và khi báo cáo phải gọi là 'policy-window
+         surprise (daily proxy)', KHÔNG gọi 'cú sốc chính sách'. Chuẩn vàng là
+         cửa sổ 30 phút quanh 14:00 ET; bản này dùng thay đổi CẢ NGÀY nên còn
+         chứa tin khác trong ngày. Độ nhiễm đã đo: |Δ2y| ngày FOMC = 1.50x ngày
+         thường, phương sai 2.01x (193 ngày, 2003-2026) — tín hiệu thật nhưng
+         không sạch."
+      - "`policy_surprise` PHẢI trả NaN ngoài phạm vi có sự kiện đã thu thập.
+         Điền 0 cho giai đoạn chưa thu thập là nói dối 'không có công bố nào'
+         trong khi thực tế 8 cuộc họp/năm — biến kiểm soát mang giá trị sai làm
+         lệch hệ số của biến CHÍNH mà không dấu hiệu gì. Cổng máy:
+         test_zero_fill_stops_at_the_edges_of_real_coverage."
+      - "Số lag của control = LAGS của LP (6), không phải tham số tự do để dò."
+      - "Bản c chỉ chạy nhánh OLS, KHÔNG chạy nhánh phân vị — câu hỏi của c trả
+         lời bằng OLS là đủ; thêm vào nhánh phân vị nhân 1.5 lần chi phí chậm
+         nhất của run mà không đổi câu trả lời. Phạm vi ghi trong docstring
+         `estimate_quantiles`, không âm thầm."
+      - "Có chuỗi cú sốc intraday đã publish (Bauer-Swanson 2023; Bu-Rogers-Wu
+         2021) thì NÊN thay proxy này bằng chúng — sạch hơn hẳn. Bản hiện tại là
+         cái chạy được ngay với dữ liệu đã có, không phải cái tốt nhất."
+    not_yet_decided: >
+      Chữ ký này KHÔNG mở khóa dùng cú sốc chính sách ở bất kỳ đường production
+      nào (pipeline serving, tier3 VN) — nó chỉ chốt vai trò BIẾN KIỂM SOÁT
+      trong bảng γ nghiên cứu. Mọi điểm nối vào service vẫn qua nguyên tắc #1.
+      Kết quả γ dưới bản c vẫn phải qua human review như mọi bảng γ khác.
+    blocked_by: null
+
 # Dữ liệu còn thiếu chặn các nhánh (docs/14 §2 1c) — KHÔNG phải việc code:
 data_blockers:
   ai_gpr_data_unverified: >

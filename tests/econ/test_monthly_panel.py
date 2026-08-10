@@ -86,6 +86,27 @@ def test_complete_case_no_nan(patched):
     assert not panel.isna().any().any()
 
 
+def test_dropna_false_keeps_warmup_rows_for_diagnosis(patched):
+    """`dropna=False` giu NaN warm-up de chan doan COT NAO rang buoc dau mau.
+
+    Tren ban da complete-case moi cot cung mot `first_valid` -> khong the biet
+    cot nao cat mau. Da mat 10 nam du lieu vi khong nhin thay dieu do
+    (T2_full_f2579b30928f). Ban chua dropna phai:
+      - dai hon (hoac bang) ban da dropna,
+      - va `.dropna()` cua no phai TRUNG KHIT ban mac dinh — neu khong thi hai
+        duong di khac nhau va chan doan noi ve mot mau khac mau uoc luong.
+    """
+    full = build_monthly_panel(dropna=False)
+    clean = build_monthly_panel()
+    assert len(full) >= len(clean)
+    assert full.isna().any().any(), "warm-up innovation phai con NaN o ban nay"
+    pd.testing.assert_frame_equal(full.dropna(), clean)
+    first_valid = {c: full[c].first_valid_index() for c in full.columns}
+    assert len(set(first_valid.values())) > 1, (
+        "cac cot phai bat dau o thoi diem khac nhau — neu bang het thi bang "
+        "chan doan vo dung")
+
+
 def test_no_gprc_vnm_raw_column(patched):
     """GPRC_VNM THO khong duoc lo ra panel (chi ban orthogonalized+innovation)."""
     panel = build_monthly_panel()

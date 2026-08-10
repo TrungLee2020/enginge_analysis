@@ -41,7 +41,214 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-05, vòng 2)
+## Trạng thái hiện tại (cập nhật 2026-08-09)
+
+### 🐛 Bug data model THẬT, lộ ra ở lần nạp Postgres SỐNG đầu tiên: AI-GPR daily/monthly ghi đè nhau
+
+`ext_series` PK = `(series_id, date, data_version)` — **không có `freq`**. `ingest/ai_gpr.py` dùng CHUNG bộ tên series cho cả file daily lẫn monthly, mà mọi ngày đầu tháng có mặt ở cả hai ⇒ cùng PK ⇒ ghi đè lẫn nhau. Nạp `--freq both` thì monthly chạy sau và thắng: **11.186 hàng** (799 ngày đầu tháng × 14 series) mang giá trị THÁNG nằm trong chuỗi gắn `freq='daily'`.
+
+**Âm thầm hoàn toàn:** giá trị tháng ≈ trung bình của tháng nên CÙNG THANG ĐO với giá trị ngày — avg ngày-đầu-tháng 212 vs ngày khác 213, biểu đồ không hề lộ. Ví dụ thật: `AIGPR_OIL 2026-03-01 = 1844.10` (giá trị THÁNG 3) trong khi giá trị NGÀY hôm đó là **610.53**.
+
+Bug có từ trước phiên này (mọi lần nạp AI-GPR đều dính); cơ chế archive mới chỉ làm nó **hiện ra** — lần nạp đầu báo "9440 giá trị bị revise" ở daily rồi monthly báo revise **đúng 9440 giá trị đó ngược lại**, gương nhau từng con số. Trước đây `ingest/ai_gpr.py` chỉ có test mock DB, không bao giờ chạm Postgres thật nên không ai thấy.
+
+**Đã sửa:** monthly mang hậu tố `_M` (`AIGPR_OIL_M`…) — khớp quy ước sẵn có của repo (GPRD daily vs GPR monthly). Thêm `series_id_for()`/`series_ids()`. Xóa 359.346 hàng AIGPR hỏng + nạp lại sạch: daily 340.466 hàng (1960→2026-07-31), monthly 11.186 hàng (1960→2026-07-01), **0 xung đột**. Thêm **chốt chặn cấu trúc trong `versioning.py`** bắt cả LỚP lỗi này ở mọi nguồn tương lai: series_id đã tồn tại với `freq` khác → raise, không nạp. `DO UPDATE` giờ cập nhật cả `freq`/`source` (bản cũ để nguyên nên hàng bị nguồn khác ghi đè sẽ **nói dối về tần suất của chính nó**). 3 test mới khóa lại.
+
+### 📊 Nạp DB thật + chạy lại mô hình trên dữ liệu mới
+
+**Ingest lên Postgres sống (lần đầu — trước giờ mọi `ingest/*.py` chỉ có test mock):**
+
+| nguồn | hàng mới | giá trị bị revise | archive |
+|---|---|---|---|
+| GPR daily | 105 | **126** (2025-03-15 → 2026-06-29) | `gpr_daily_pre_20260809` |
+| GPR monthly | 94 | **520** (2025-03 → 2026-06) | `gpr_monthly_pre_20260809` |
+| AI-GPR daily/monthly | 351.652 | 0 | — (nạp lại sạch sau khi sửa bug) |
+
+Khớp chính xác con số đo trước khi nạp. `data_versions` giờ có sổ thật.
+
+**`run_t2_full.py` chạy thật trên dữ liệu mới → `docs/reports/T2_full_3e1bd83a02b8.md`** (535s). So với bản cũ `T2_full_f2579b30928f.md`:
+
+| | cũ (`same_measure`, 231 tháng) | mới (`level_lags`, 315 tháng) |
+|---|---|---|
+| p thô < 0.10 / 432 | 34 — **DƯỚI** kỳ vọng null 43.2 | 51 (1.18×, z≳+1.25) |
+| Holm survivors (bản b) | 9 | 9 |
+| — LEVEL / INNOVATION / LEVEL+JUMP | 2 / 1 / 6 | **0 / 0 / 9** |
+| đồng thuận cả 3 thước đo | 1 ô | **0 ô** |
+| ô mạnh nhất | freight × LEVEL+JUMP h=1 | infl_exp × LEVEL+JUMP h=2 |
+
+**⚠️ Đọc kết quả này thế nào (chờ human review, mục cuối report còn trống):**
+- **Bản b ở mức lưới = 0.93× kỳ vọng null** — tức DƯỚI nhiễu thuần. 9 ô "sống sót Holm" nằm trong một lưới không tách được khỏi null toàn cục. Đúng cái mà `grid_null_check` sinh ra để chặn.
+- Bản a = 1.44× vs bản b = 0.93× ⇒ phần "riêng của GPR" chính là thứ battery EPU hấp thụ.
+- **9 ô đó dồn HẾT vào LEVEL+JUMP** — đúng ô mà `DEC-2026-08-09-battery-control-form` đã ghi trước là control YẾU NHẤT (JUMP phi tuyến, ngoài span `{LEVEL, lag}`). Nên đây là artifact đã được dự báo, không phải phát hiện. Đồng thuận 3 thước đo = 0 củng cố cách đọc này.
+- Mẫu dài thêm 84 tháng KHÔNG biến kết quả thành có tín hiệu.
+
+### 🔥 Sự cố đã xảy ra thật: tên artifact chỉ mã hóa DỮ LIỆU, không mã hóa SPEC
+
+Chạy `run_t2_full.py` với spec mới (thêm bản battery c) trên **cùng file dữ liệu** → `_data_version()` băm file nên ra **đúng một tên**. Hệ quả: `FileExistsError` chặn được file `.md`, nhưng **CSV đã bị ghi đè TRƯỚC đó** (thứ tự cũ: ghi CSV → mới kiểm report). Kết quả: `t2_full_gamma_3e1bd83a02b8.csv` chứa kết quả spec MỚI trong khi `T2_full_3e1bd83a02b8.md` mô tả spec CŨ — hai thứ mâu thuẫn, không cảnh báo gì.
+
+**Hai vá, cả hai đều là vá gốc:**
+1. `_spec_version()` — băm `INFERENCE/LAGS/HORIZONS/FOCAL/TAUS/ALPHA/CI/SEED/BATTERY_*/CHANNELS`. Tên artifact giờ là `<data>_<spec>`. Trùng tên giờ thật sự nghĩa là "cùng dữ liệu VÀ cùng spec".
+2. **Kiểm va chạm TRƯỚC khi ghi bất cứ gì** (report + cả 3 CSV), không phải sau. Ghi một phần rồi mới phát hiện va chạm là cách tạo ra đúng tình trạng mâu thuẫn trên.
+
+✅ **Đã khôi phục** bằng `scripts/restore_t2_legacy_csv.py` — tái lập **khớp chính xác cả 5 con số** của report cũ (315 tháng · 432 kiểm định focal · 51 bác bỏ thô · 22 Holm · bản b 9), đó là bằng chứng CSV sinh ra đúng thuộc về report đó. Script tự đối chiếu TRƯỚC khi ghi; lệch là dừng chứ không tạo CSV giả.
+
+⚠️ Điểm đáng nhớ về cách làm: `BATTERY_VERSIONS` nay nằm trong `DEC-2026-08-09-policy-shock-control`, nên sửa hằng số đó trong file — dù chỉ để chạy một lần — sẽ làm test chữ ký đỏ. Script **override lúc chạy** (gán thuộc tính trên module đã import), không chạm file nào. Đi vòng qua cổng một cách hợp lệ, không vô hiệu hóa cổng.
+
+### 💵 Cú sốc chính sách Fed — biến kiểm soát CÒN THIẾU của bảng γ (mới, research)
+
+**Vì sao nó thuộc về dự án này, không phải module rời:** bảng γ ước lượng "cú sốc GPR → vĩ mô toàn cầu". Nhưng tin Fed **cũng đẩy đúng những biến đó** (lãi suất, DXY, VIX, giá dầu). Tháng nào có cả cú sốc GPR lẫn công bố FOMC mà không tách ra thì γ **hút luôn** phần do Fed gây ra. Battery hiện tại (EPU) kiểm soát **bất định** chính sách, KHÔNG kiểm soát **cú sốc** chính sách — hai thứ khác nhau.
+
+`econometrics/policy_shock.py`: `event_days` · `policy_surprise` · `to_monthly` · `contamination_ratio`. 11 test.
+
+**KHÔNG dùng LLM cho phần này** — cú sốc chính sách Mỹ đo trực tiếp được từ phản ứng giá tài sản quanh công bố (giá phái sinh đã chứa kỳ vọng, nên phần đổi trong ngày công bố CHÍNH LÀ phần bất ngờ). Chấm giọng điệu rồi suy ra độ lớn là thay phép đo trực tiếp bằng proxy nhiễu hơn (#2). LLM vẫn có chỗ nhưng ở chiều khác: các chiều giá KHÔNG định giá riêng ra được (ngôn ngữ forward guidance, bất đồng biểu quyết, độ bất định câu chữ).
+
+**Chạy thật trên dữ liệu sống (2026-08-09):** 195 ngày công bố statement (2003-01 → 2026-07, từ 406 văn bản đã thu thập), `DGS2` từ FRED, ra **167 tháng** có họp FOMC.
+
+| kiểm chứng | kết quả |
+|---|---|
+| \|Δ2y\| ngày FOMC vs ngày thường | **1.50×** |
+| phương sai | **2.01×** |
+| cú sốc lớn nhất | 2023-12-13 (pivot, −27bp) · 2003-06-25 (cắt 25bp khi chờ 50) · 2004-01-28 (bỏ "considerable period") · 2008-03 · 2022-06-15 |
+
+Rơi đúng các ca kinh điển của văn liệu — phép đo bắt được thứ cần bắt.
+
+⚠️ **Đây là proxy NGÀY, không phải chuẩn vàng intraday.** Chuẩn vàng là cửa sổ 30 phút quanh 14:00 ET; bản này dùng thay đổi cả ngày nên còn chứa tin khác trong ngày. Tỉ lệ 1.50× là tín hiệu thật nhưng **không sạch**. Chuỗi intraday đã publish (Bauer-Swanson 2023; Bu-Rogers-Wu 2021) sạch hơn — dùng được thì NÊN dùng. Khi báo cáo gọi "policy-window surprise (daily proxy)", đừng gọi "cú sốc chính sách". Trần claim `measurement`.
+
+**✅ ĐÃ NỐI VÀO BẢNG γ → `docs/reports/T2_full_3e1bd83a02b8_cb1a51.md`** (671s, 309 tháng 2000-08 → 2026-06), **đã ký `DEC-2026-08-09-policy-shock-control`**. Thêm **bản battery c** (= b + `mp_surprise` + 6 lag) thay vì sửa bản b — đổi định nghĩa b thì mọi số cũ hết so được. Chữ ký khóa bằng `LOCKED_DECISION_IDS` + `test_policy_shock_control_decision_matches_code` (bắt cả ba cam kết: c ⊃ b · a/b giữ nguyên · `policy_surprise` trả NaN ngoài phạm vi có sự kiện).
+
+Vá thêm khi làm: `_BOARDDOCS_HREF_RE` bỏ sót statement 2000-2002 (nằm dưới `/boarddocs/press/**general**/`, link kết thúc bằng `/` không `default.htm`) → 195 ngày công bố lên **225**. Và `policy_surprise` giờ trả **NaN ngoài phạm vi có sự kiện**: điền 0 cho giai đoạn chưa thu thập là nói dối "không có công bố" trong khi thực tế 8 cuộc họp/năm — biến kiểm soát mang giá trị sai làm lệch hệ số của biến CHÍNH mà không dấu hiệu gì.
+
+| bản battery | bác bỏ thô / 216 | vs kỳ vọng null | ô sống sót Holm |
+|---|---|---|---|
+| a — không control | 24 | 1.11× | — |
+| b — EPU | 19 | 0.88× | 8 |
+| **c — EPU + cú sốc chính sách** | **18** | **0.83×** | **7** |
+
+**Đọc kết quả:**
+- **Toàn lưới 61/648 vs kỳ vọng 64.8 = 0.94×, z≳−0.50 → DƯỚI null toàn cục.** Câu "γ có sống sót khi kiểm soát Fed không" phần lớn là moot: γ không có tín hiệu ở mức lưới ngay từ đầu.
+- Thêm control chính sách đẩy lưới xuống tiếp (0.88× → 0.83×) và bỏ 1 ô giá tài sản (4→3). Tức **có** một chút phần γ đang tính công của Fed, nhưng nhỏ — không phải lời giải thích chính.
+- Vẫn **0/0/7-8**: mọi ô sống sót dồn hết vào LEVEL+JUMP, LEVEL và INNOVATION đều 0. Đồng thuận 3 thước đo = 0. Giống hệt run trước → đọc như artifact của thước đo, không phải phát hiện.
+
+### 🏛️ Văn bản Fed — đo độ hiện diện của GPR trong phát ngôn chính sách (mới, research)
+
+**Phân biệt hai thứ hay bị lẫn:** FRED = số (không LLM). **FED = văn bản** (FOMC statement/minutes) → LLM đúng chỗ. `ingest/fomc.py` + `scoring/policy_gpr_scorer.py`.
+
+**Nó KHÔNG đo cú sốc chính sách tiền tệ Mỹ** — cái đó đã có bản đo sạch hơn từ giá phái sinh quanh cửa sổ FOMC (Kuttner 2001; Gürkaynak-Sack-Swanson 2005; Nakamura-Steinsson 2018; chuỗi Bauer-Swanson 2023, Bu-Rogers-Wu 2021 đã publish). Chấm hawkish/dovish bằng LLM để suy ra cú sốc đó là dựng lại cái đã có bằng proxy nhiễu hơn (#2). Lý do `docs/14` §5 chọn Aruoba-Drechsel là vì **VN** không có phái sinh lãi suất; Mỹ thì có.
+
+**Nó đo câu hỏi NGƯỢC LẠI, và là câu hỏi riêng của dự án:** rủi ro địa chính trị có đi vào hàm phản ứng chính sách không, mạnh tới đâu, qua kênh nào. Không nguồn nào bán sẵn; C-I làm biến thể tương tự trên Beige Book/earnings call.
+
+- **Rubric RIÊNG** (`gpr_salience` 0-1 · `channel` · `direction` · `binding` · `evidence` trích nguyên văn), KHÔNG dùng lại thang leo thang ±1.0 — `docs/17` §4.6 ghi thẳng điều này. Hai construct khác nhau: ±1.0 đo *một bên LÀM GÌ*, rubric này đo *một văn bản NÓI VỀ* rủi ro của bên thứ ba. Fed nói "căng thẳng Trung Đông làm tăng giá năng lượng" KHÔNG phải Fed leo thang +0.6.
+- **Kênh dùng đúng 4 kênh truyền dẫn của bảng γ**, không phải 6 kênh chấm điểm của docs/00 — đầu ra để đối chiếu với γ tầng 2, trả taxonomy rồi phải map 6→4 (mapping đang MỞ) là tự thêm một bước mơ hồ.
+- **Trần claim `measurement`**. Nói "GPR ảnh hưởng quyết định Fed" là bước lên `association`, cần hồi quy — không phải cần thêm một trường JSON.
+- Cùng hợp đồng với `statement_scorer`: `training_cutoff` bắt buộc, prompt cấm dùng kiến thức sau ngày công bố, cache phủ MỌI trục version, JSON strict (sai key/miền → raise, KHÔNG clip).
+
+**Hai phát hiện khi chạy thật trên federalreserve.gov (2026-08-09):**
+
+1. **403 là chặn BOT, không phải chặn egress** — thêm `User-Agent` kiểu trình duyệt là 200. Nhầm hai cái này sẽ ra kết luận "không tải được" sai.
+2. **Link minutes trong RSS trỏ tới THÔNG CÁO, không phải bản minutes.** Thông cáo ~760 ký tự ("The Federal Reserve on Wednesday released the minutes of…"); bản thật ở `/monetarypolicy/fomcminutesYYYYMMDD.htm` dài **36.171-46.083 ký tự** và đầy nội dung địa chính trị (`middle east` ×12-21, `conflict` ×14-21, `war` ×11-13). Chấm nhầm thông cáo **không báo lỗi** — chỉ làm mọi bản minutes ra salience ~0 một cách HỆ THỐNG, tức chuỗi sai mà trông như thật. Đã thêm `resolve_minutes_url()` + ngưỡng độ dài **theo từng loại** (`statement` 200 / `minutes` 5000) để resolve hỏng thì raise thay vì thành điểm 0 im lặng.
+
+Kiểm thật 4 văn bản gần nhất: statement 1044-1253 ký tự, minutes 36k-46k, resolve đúng cả hai. **CHƯA gọi LLM lần nào** — cần `OPENAI_API_KEY` và đó là chi phí của user. 33 test (fetcher + LLM client đều tiêm vào, không chạm mạng).
+
+**Backfill lịch sử — `list_archive()`, đọc VĂN BẢN THẬT.** RSS chỉ giữ ~15 mục nên đó là đường *cập nhật*; kho thật lấy từ mục lục của Fed: trang lịch hiện tại cho **90 release (2021-01-27 → 2026-07-29)**, `fomchistorical<YYYY>.htm` cho từng năm cũ (2014-2015: 32 release). Chạy thật, không suy đoán.
+
+**❌ TUYỆT ĐỐI KHÔNG backfill bằng cách hỏi LLM nhớ lại nội dung văn bản cũ.** Đó là SINH dữ liệu từ trí nhớ model, không phải ĐO văn bản (#1); model biết chuyện xảy ra sau nên mọi điểm sẽ nhiễm hindsight — đúng thứ `training_cutoff` sinh ra để chặn; và trường `evidence` đòi trích nguyên văn sẽ thành trích dẫn bịa. Ghi cảnh báo này ngay trong `ingest/fomc.py`.
+
+**Bẫy point-in-time thứ ba, đã vá:** URL minutes mang ngày **HỌP**, nhưng minutes công bố **~3 TUẦN SAU** (họp 2015-12-16 → công bố 2016-01-06). Lấy ngày họp làm `published_at` là look-ahead ba tuần. Ngày công bố nằm trong text quanh link — `(Released July 08, 2026)` ở trang mới, `Minutes (Released February 18, 2015):` ở trang cũ (hai layout khác nhau, parse cả hai). Không tìm thấy → `raise`, không lấy tạm ngày họp.
+
+**Kiểm chéo mạnh:** timestamp suy từ archive (14:00 ET, có xử lý DST) **trùng khít** timestamp RSS — statement 2026-07-29 18:00 UTC, minutes 2026-07-08 18:00 UTC. Hai đường độc lập cho cùng một mốc, nên chuỗi backfill nối liền được với chuỗi cập nhật. Khóa bằng test.
+
+**✅ ĐÃ CHẠY THẬT trên vLLM của user (2026-08-09) → `docs/reports/FOMC_gpr_salience_pg1_2000.md`.** `Qwen3-14B-AWQ`, 109 phút, **403/406 văn bản** (3 lỗi contract, 0,7% — nổi lên ở log chứ không bị nuốt thành điểm 0), 1147 đoạn.
+
+| | |
+|---|---|
+| phạm vi | 2000-03-23 → 2026-07-29, 295 tháng có văn bản |
+| salience trung bình | 0.0709 (statement 0.048 · minutes 0.091) |
+| có ít nhất một đoạn `binding` | 31.8% văn bản |
+| hoàn toàn không có nội dung địa chính trị | 66.8% |
+
+**Narrative check PASS — top-15 rơi đúng vào các đợt thật:** Nga xâm lược Ukraine 2022-03/05/06/09 (0.60-0.70) · hậu 11/9 (minutes 2001-11-08, 0.653) · chiến tranh Iraq 2003-03/05/06 (0.60-0.64) · Trung Đông 2026-04/05/07 (0.47-0.55). `evidence` trích nguyên văn, kiểm tay thấy khớp.
+
+**Kiểm chứng hội tụ (mức `association`, KHÔNG có trong report vốn trần `measurement`):** corr(salience, log1p GPR monthly) = **+0.439** Pearson / +0.316 Spearman trên 295 tháng, đọc từ DB sống. Hai phép đo độc lập — lời của chính Fed vs chỉ số báo chí C-I — đồng hướng. Đây là bằng chứng cho tiền đề của cả dự án, không phải chỉ cho module này.
+
+**✅ `pg2` ĐÃ CHẠY (2026-08-09) → `docs/reports/FOMC_gpr_salience_pg2_2000.md`** (115 phút, **435/436** văn bản — 1 lỗi contract so với 3 ở pg1). Coverage rộng hơn pg1 (436 vs 406) nhờ bản vá `_BOARDDOCS_HREF_RE`. **Tốt hơn pg1 trên mọi chiều đo được:**
+
+| | pg1 | pg2 |
+|---|---|---|
+| lệch thiên tai (2 ca cũ) | **0.40 / 0.39** | **0.10 / 0.02** |
+| trích dẫn khớp nguyên văn | 92.5% | **94.9%** (112 exact / 6 missing / 317 empty) |
+| corr Spearman với log1p GPR | +0.316 | **+0.358** |
+| corr Pearson | +0.439 | +0.437 |
+| văn bản hoàn toàn không có nội dung ĐCT | 66.8% | 72.9% |
+
+**Đây là chữ ký của một rubric tốt lên chứ không phải chỉ khác đi:** Pearson gần như không đổi trong khi Spearman TĂNG — siết rubric bỏ được nhiễu (dương tính giả) mà không bỏ mất tín hiệu. Narrative check vẫn đúng: top-10 là Iraq 2003, Ukraine 2022, Trung Đông 2026.
+
+`evidence_check` giờ chạy TỰ ĐỘNG trên mọi hàng (`verify_evidence`, đối chiếu máy với văn bản gốc) — cổng chống bịa không cần người. `judge_score()` (LLM thẩm định) đã có nhưng CHƯA chạy; nhớ giới hạn: hai LLM đồng ý là **độ tin cậy**, không phải **độ đúng**.
+
+**🐛 Lệch đã đo ở pg1, là lý do có pg2:** 2/134 văn bản có salience>0 là **thiên tai** bị chấm thành địa chính trị (`Hurricane Rita caused further disruption to energy production` 0.39; `Gasoline prices rose in the aftermath of the hurricanes` 0.40). Model neo vào "gián đoạn nguồn cung năng lượng" rồi suy ra địa chính trị — đúng kiểu lệch `docs/17` §5 đã ghi. `pg2` loại trừ tường minh thiên tai/đại dịch và nói rõ "gián đoạn chỉ là địa chính trị nếu nguyên nhân là nhà nước / nhóm vũ trang / quyết định chính trị". ⚠️ Bump version làm **toàn bộ cache pg1 vô hiệu** (đúng thiết kế) → chạy lại tốn thêm ~2 giờ GPU. Với 1,5% ô nhiễm, **chưa chạy lại** — để user quyết.
+
+**vLLM chạy được ngay, không cần client thứ hai:** `statement_scorer.openai_chat_client(model, base_url, api_key)` hoạt động với mọi endpoint OpenAI-compatible và `policy_gpr_scorer.LLMClient` cố ý cùng chữ ký. ⚠️ Client đó đặt `response_format={"type":"json_object"}` — vLLM chỉ hỗ trợ khi bật guided decoding; không bật thì lỗi ngay request đầu, đó là lỗi CẤU HÌNH, không được sửa bằng cách nới lỏng parse.
+
+### 🔌 FRED vào DB + đọc point-in-time có nhận biết revise
+
+**FRED KHÔNG cần LLM.** Nó là số sẵn từ API St. Louis Fed (Brent/DXY/VIX/US10Y), không có chữ để chấm — LLM chỉ vào chỗ có văn bản, đó là việc của AI-GPR (chấm bài báo). FRED gọi được từ sandbox, không cần API key. `ingest/market_data.py` đã nối vào `versioning.py`; ingest thật: **32.838 hàng, 1990-01-02 → 2026-08-06**.
+
+**Hai lỗi lộ ra khi lần đầu đọc production path từ DB, đã sửa:**
+
+1. **`load_series(as_of=...)` trả VỀ RỖNG.** Tôi thêm `loaded_at <= as_of` ở lượt trước — trộn "lúc TA nạp" với "lúc giá trị biết được". Cả DB nạp hôm nay nên mọi `as_of` trước hôm nay ra 0 hàng: đúng kỹ thuật, vô dụng thực tế. Bỏ điều kiện đó.
+2. **Thay bằng `revision_aware=True`** (mặc định): với mỗi `(series_id, date)`, lấy giá trị **đang có hiệu lực tại `as_of`** — bản archive có `revised_at > as_of` (lấy bản bị thay thế sớm nhất), nếu không có thì bản chạy.
+
+**Bằng chứng trên dữ liệu sống** — `GPRD_ACT` ngày 2026-06-24:
+
+| góc nhìn | giá trị |
+|---|---|
+| hôm nay (bản chạy) | 163.08 |
+| `as_of=2026-06-30, revision_aware=True` | **293.83** ← số thật đã công bố lúc đó |
+| `as_of=2026-06-30, revision_aware=False` | 163.08 ← look-ahead trên trục revise |
+
+Chênh 80%. Backtest đọc bản hôm nay là dùng thông tin chưa tồn tại. `store.load_jump_series` lọc `data_version=RUNNING_VERSION` (đường sống, `as_of=now`) — replay lịch sử là việc của `load_series(revision_aware=True)`.
+
+**`ingest/macro_monthly.py` (mới) — lấp nốt khoảng trống cuối của đường DB.** 6 chuỗi THÁNG: `INDPRO`/`CPI`/`INFL_EXP` (outcome vĩ mô thực) + `EPU_US`/`EPU_GLOBAL` (battery) + `FREIGHT_PPI` (kênh vật lý). Ingest thật: **2.803 hàng, 1985-01 → 2026-07**. Trước đó ba nhóm này CHỈ tồn tại ở đường file nên panel tầng 2 không dựng được từ DB.
+
+- Lưu **mức thô**; transform (`100·Δln INDPRO`, `Δln CPI`, sai phân `infl_exp`, `log1p` EPU, `Δln` freight) vẫn là việc của `data_files.transform_*` — không fork quy ước sang chỗ thứ hai (docs/07 §0).
+- **`available_at` theo TỪNG series**, không một con số chung: `INDPRO`/`CPI` +18 ngày, `FREIGHT_PPI` +20, `EPU_*` +7, `INFL_EXP` +5 — tính từ **đầu tháng kế tiếp**, không từ `date`. Series chưa khai độ trễ → `raise`, không mặc định 0 (mặc định 0 là look-ahead im lặng).
+- Mã FRED không import lại được từ `data_files` (chiều phụ thuộc ngược = vòng tròn) nên khóa bằng `test_macro_monthly_codes_match_research_path`.
+- Đọc lại qua `dataset.load_monthly_macro_raw()`. Kiểm thật: `as_of=2026-07-10` → `ip` dừng ở tháng 5, vì IP tháng 6 phải tới 2026-07-19 mới công bố. Đúng point-in-time.
+- Coverage khớp kỳ vọng: `epu_global` 354 tháng (1997+), `freight` 457 (1990+), còn lại 497-499.
+
+⚠️ `BRENT`/`DXY` NaN ở 3 ngày cuối là **độ trễ publish thật của FRED**, không phải lỗi.
+
+⚠️ **ALFRED vẫn là việc chưa làm.** Với macro revise hồi tố mạnh (INDPRO revise tới 5 năm, CPI/PPI nhiều kỳ), nguồn point-in-time đúng là **ALFRED vintage** — bản FRED luôn là vintage mới nhất. Cơ chế archive chỉ giữ vintage TỪ LÚC ta bắt đầu nạp trở đi, KHÔNG dựng lại được quá khứ trước đó. ALFRED cần API key riêng của FRED → cần user cấp. Với ước lượng γ (mô tả truyền dẫn) bản hiện tại chấp nhận được; với backtest sinh tín hiệu thì KHÔNG.
+
+### 🩹 Áp 3 patch user cung cấp: đối chiếu mức lưới + chi phí mẫu battery
+
+User đưa 3 file patch ở repo root (`patch1_grid_null_check.py`, `patch2_battery_and_sample.py`, `patch3_report_wiring.py` — bản mô tả, KHÔNG phải module chạy được). Đã áp vào code thật, 369 test pass (4 fail có sẵn từ trước, xem cuối mục).
+
+- **`multiplicity.grid_null_check()` (patch 1)** — đối chiếu số bác bỏ thô với `n·α` dưới **null toàn cục**. Trả lời câu Holm KHÔNG trả lời: Holm nói "ô NÀO sống sót trong họ này", cái này nói "toàn lưới có nhiều hơn nhiễu thuần không". Ở `T2_full_f2579b30928f` hai câu cho kết luận **ngược nhau** — 15 ô "sống sót Holm" nhưng 34 bác bỏ thô < 43.2 kỳ vọng null (đã kiểm lại trên CSV thật: 432/34/15, khớp chính xác). Họ Holm chỉ 4/3/1 outcome nên ngưỡng nghiêm nhất α/4, gần như không phạt gì so với quy mô 432 kiểm định. `z_indep` là **cận dưới** của |z| thật (kỳ vọng cộng tính bất kể tương quan, chỉ phương sai mới phình) — đọc dấu, không báo cáo như p-value.
+- **`run_t2_full.BATTERY_MODE = "level_lags"` (patch 2), đã ký `DEC-2026-08-09-battery-control-form`** — battery EPU vào dạng LEVEL + 6 lag thay vì cùng thước đo với shock (`same_measure`, docs/14 §2 1a). Hợp lệ vì `INNOVATION(EPU)` là tổ hợp tuyến tính của `{LEVEL(EPU), lag}` nên span control chứa trọn nó. **Chạy thật cả hai chế độ trên dữ liệu thật (2026-08-09), không suy đoán:**
+
+  | chế độ | mẫu | bắt đầu | cột ràng buộc |
+  |---|---|---|---|
+  | `same_measure` | 231 tháng | 2007-02 | `epu_global_LEVEL_PLUS_JUMP` |
+  | `level_lags` | **315 tháng** | **2000-02** | `GPR_THREAT_LEVEL_PLUS_JUMP` |
+
+  **+84 tháng (7 năm)**; 231 khớp đúng mẫu của `T2_full_f2579b30928f` → chẩn đoán của patch được xác nhận. **Phát hiện thêm, sửa cả patch lẫn phán đoán ban đầu của tôi:** sau khi đổi, cột ràng buộc **chuyển sang JUMP của chính trục shock** — phần 1990-2000 còn mất là chi phí **NỘI TẠI** của thước đo LEVEL+JUMP, không phải lỗi control; bỏ `epu_global` khỏi battery cũng không lấy lại được. **Đánh đổi thật, ghi vào report mỗi run**: `JUMP` phi tuyến KHÔNG nằm trong span `{LEVEL, lag}` → ở thước đo LEVEL+JUMP, `level_lags` hấp thụ ÍT HƠN. Cả hai chế độ giữ lại; chữ ký khóa bằng `LOCKED_DECISION_IDS` + `test_battery_control_form_decision_matches_code`.
+- **`build_monthly_panel(dropna=False)` (mới, cần cho patch 2)** — chẩn đoán mẫu của patch chạy trên panel đã complete-case thì **vô nghĩa** (mọi cột cùng một `first_valid`). Thêm cờ trả panel chưa complete-case; `main()` dựng **một lần** rồi `.dropna()` — ý nghĩa "một mẫu duy nhất" không đổi. `sample_binding_report`/`sample_cost` in ra "mất bao nhiêu tháng, vì cột nào" trước mỗi run và vào report.
+- **Guard P1 bắt được patch 3 khi áp thẳng** — bảng phụ mức lưới nằm chung một phần tử với văn xuôi nên guard soi cả bảng và báo đỏ. Sửa đúng hướng: số trong văn xuôi lấy từ `stats` (`grid_*`, `sample_*` là trường mới), khối bảng là phần tử riêng. `GridNullCheck.to_markdown()` giữ lại cho notebook nhưng **runner không dùng** — nó format từ trường của chính nó nên nằm ngoài payload runner (ghi trong docstring).
+- **Thứ tự mục trong report có chủ đích:** *Chi phí mẫu* (ngay sau Metadata) → *Đối chiếu mức lưới* → mới tới bảng Holm. Đọc "15 ô sống sót" trước rồi mới đọc "34 < 43.2" thì ấn tượng đầu đã hình thành.
+- **Test mới:** 7 cho `grid_null_check` (gồm case T2_full thật + case "Holm sống sót nhưng lưới dưới null"), 1 cho `dropna=False`, 11 cho runner (tên cột control khớp panel thật ở CẢ hai chế độ — lệch tên thì lỗi nổ sau ~5 phút ước lượng chứ không phải lúc dựng panel).
+
+### 🗂️ Cập nhật đường dẫn dữ liệu theo layout mới + vintage 2026-08
+
+Commit `e3bde3b` dời file vào `data/GPR index/` + `data/AI-GPRs/` nhưng code vẫn trỏ đường cũ → `run_t2_full.py` và `test_report_guard_p1` gãy. Đã trỏ lại toàn bộ 9 hằng số `DEFAULT_*` (`data_files.py`) + default `--path` của `ingest/{gpr_daily,gpr_monthly,ai_gpr}.py`, và đồng bộ README/Dockerfile/docker-compose/CLAUDE.md.
+
+**Vintage lên theo (đây là đổi DỮ LIỆU, không phải dọn đường dẫn):** daily `1985-01-01 → 2026-08-03` (trước: hết 2026-06-29) · monthly `1900-01 → 2026-07` (trước: hết 2026-06). `--source-version` của hai script ingest lên `*_202608`. Cả 8 loader đã chạy thật trên file mới, parse sạch. AI-GPR chỉ đổi chỗ, vintage không đổi.
+
+`data_gpr_export (1).xls` **trùng nội dung** `data_gpr_export_202608.xls` (đối chiếu `assert_frame_equal`) — chọn bản có vintage trong tên. `(1)` trong tên file daily là hậu tố trình duyệt, giữ nguyên tên thật; **không** có fallback ngầm dò tên file (bẫy "đổi default âm thầm", docs/18 §7).
+
+⚠️ Hệ quả: `_data_version()` băm byte 2 file này → **report chạy sau đây sẽ có tên khác** `T2_full_f2579b30928f.md`. Đó là đúng thiết kế (#4), không phải lỗi. Quy tắc đổi vintage ghi ở `data/README.md`.
+
+3 file `patch*.py` ở repo root vẫn còn nguyên (chưa xóa) — nội dung đã vào code hết.
+
+## Trạng thái trước đó (2026-08-05, vòng 2)
 
 ### 📄 Task 1-3 AI-GPR: đọc paper, phân tích toàn mẫu vai trò VN, đề xuất mapping kênh
 
@@ -190,8 +397,11 @@ Phase 1a chạy xong 2026-08-02 (`scripts/run_t2_full.py`). Mẫu **231 tháng**
 
 ## Dữ liệu đã có sẵn (trong `data/` khi user cung cấp)
 
-- `data_gpr_daily_recent.xls`: GPRD/GPRD_ACT/GPRD_THREAT daily, 1985 → 2026-06-29. DÙNG ĐƯỢC NGAY.
-- `data_gpr_export_202607.xls` (bản 44 nước, ĐÃ CÓ): 1518 dòng × 115 cột, monthly 1900 → 2026-06. Chứa 44 cột `GPRC_*` (recent 1985+) + 44 cột `GPRHC_*` (historical 1900+), gồm cả `GPRC_VNM` và `GPRHC_VNM`. Cột dictionary: `var_name`/`var_label`.
+⚠️ **Layout đổi 2026-08-08** (commit `e3bde3b`): `data/GPR index/` + `data/AI-GPRs/`. Mọi hằng số `DEFAULT_*` trong `data_files.py`/`ingest/*.py` đã trỏ theo (2026-08-09). Chi tiết đầy đủ + quy tắc đổi vintage: `data/README.md`.
+
+- `data/GPR index/data_gpr_daily_recent (1).xls`: GPRD/GPRD_ACT/GPRD_THREAT daily, 15190 dòng, 1985-01-01 → **2026-08-03**. DÙNG ĐƯỢC NGAY. (`(1)` là hậu tố trình duyệt, không phải bản nháp.)
+- `data/GPR index/data_gpr_export_202608.xls` (bản 44 nước): 1519 dòng × 115 cột, monthly 1900 → **2026-07**. Chứa 44 cột `GPRC_*` (recent 1985+) + 44 cột `GPRHC_*` (historical 1900+), gồm cả `GPRC_VNM` và `GPRHC_VNM`. Cột dictionary: `var_name`/`var_label`. File `data_gpr_export (1).xls` cùng thư mục **trùng nội dung** (đã đối chiếu `assert_frame_equal`) — không dùng.
+- `data/AI-GPRs/*.csv`: 2 chỉ số tổng hợp (daily 24319 dòng 1960→2026-07-31, monthly 799 dòng) + 4 file Country Decompositions. Vintage không đổi, chỉ đổi chỗ.
 
 ### Lưu ý phân phối GPRC_VNM (quan trọng cho econometrics)
 - GPRC_VNM: mean ≈ 0.05, std ≈ 0.05, **lệch phải mạnh** (đa số tháng ~0, thỉnh thoảng spike). Đặc tính chung của country-GPR nước nhỏ.
@@ -231,18 +441,20 @@ Report versioned vào `docs/reports/` — **không bao giờ ghi đè** (`FileEx
 
 **Guard số (P1, docs/11 §1 / docs/12 §5.4):** mọi số trong narrative report PHẢI tính từ dict `stats`, KHÔNG hard-code. Bug đã xảy ra thật (E1 ghi "1.8×" trong khi payload = 2.77×). Thêm số vào report thì thêm trường vào `stats` rồi tham chiếu, không gõ tay.
 
-Đọc GPR từ `data/*.xls` + macro từ FRED, cache ở `data/cache/`. Xuất report versioned vào `docs/reports/` — **không bao giờ ghi đè**.
+Đọc GPR từ `data/GPR index/*.xls` + macro từ FRED, cache ở `data/cache/`. Xuất report versioned vào `docs/reports/` — **không bao giờ ghi đè**.
 
 **Ingest vào PostgreSQL** (cần `--dsn`, đây là đường production):
 
 ```bash
 psql "$DSN" -f sql/001_schema_core.sql
 psql "$DSN" -f sql/002_schema_serving.sql   # statements/statement_scores/ladder_state/news_assessment
-python -m gpr_engine.ingest.gpr_daily   --path data/data_gpr_daily_recent.xls --dsn "$DSN"
-python -m gpr_engine.ingest.gpr_monthly --path data/data_gpr_export_202607.xls --dsn "$DSN"
-python -m gpr_engine.ingest.market_data --dsn "$DSN" --source fred
+# --path/--path-daily/--path-monthly đã mặc định đúng file hiện có; ghi ra đây cho rõ.
+python -m gpr_engine.ingest.gpr_daily   --path "data/GPR index/data_gpr_daily_recent (1).xls" --dsn "$DSN"
+python -m gpr_engine.ingest.gpr_monthly --path "data/GPR index/data_gpr_export_202608.xls" --dsn "$DSN"
+python -m gpr_engine.ingest.market_data   --dsn "$DSN" --source fred   # BRENT/DXY/VIX/US10Y (daily)
+python -m gpr_engine.ingest.macro_monthly --dsn "$DSN"                 # IP/CPI/INFL_EXP/EPU/FREIGHT (monthly)
 python -m gpr_engine.ingest.ai_gpr --dsn "$DSN" \
-    --path-daily data/ai_gpr_data_daily.csv --path-monthly data/ai_gpr_data_monthly.csv
+    --path-daily data/AI-GPRs/ai_gpr_data_daily.csv --path-monthly data/AI-GPRs/ai_gpr_data_monthly.csv
 ```
 
 **Chạy pipeline serving thật** (sau khi đã ingest ở trên — cần γ đã có ở `docs/reports/data/t2_full_holm_*.csv`, tức đã chạy `run_t2_full.py` ít nhất một lần):
@@ -266,14 +478,37 @@ docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/001_schema_core.
 docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/002_schema_serving.sql
 # đặt file GPR đã tải vào ./data/ (mount sẵn vào /app/data trong container)
 docker compose run --rm app python -m gpr_engine.ingest.gpr_daily \
-    --path data/data_gpr_daily_recent.xls \
+    --path "data/GPR index/data_gpr_daily_recent (1).xls" \
     --dsn postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
 # tương tự cho ingest.gpr_monthly / ingest.market_data / ingest.ai_gpr
 docker compose up app          # chạy pipeline serving thật (Kafka consumer)
 ```
 Ảnh `app` **không copy `data/`** (file GPR `.xls`/`.csv` là gitignored, do người vận hành cung cấp) — mount qua volume `./data:/app/data`, khớp đúng use case "sau này có file GPR về để xử lý": thả file vào `data/`, chạy lại lệnh ingest tương ứng, không cần rebuild ảnh. Với API tin tức đầu vào: publish JSON khớp schema `Statement` (xem docstring `scripts/run_news_service.py`) vào topic Kafka `GPR_KAFKA_TOPIC_IN` (mặc định `gpr.news.raw`) — bất kỳ ngôn ngữ/hệ thống nào cũng publish được, không cần chạm code Python.
 
-⚠️ **Lưu ý vận hành `--data-version`** (áp dụng cho MỌI script `ingest/*.py`, không riêng Docker): mặc định `--data-version v1` cho mọi lần chạy. Nạp lại file GPR mới mà KHÔNG đổi `--data-version` sẽ UPSERT đè giá trị cũ cùng ngày dưới cùng version — mất khả năng phân biệt "dữ liệu biết tại thời điểm nào" (nguyên tắc #4). Nếu cần giữ lịch sử vintage, đặt `--data-version` mới mỗi lần nạp file mới (vd theo ngày tải). Đây là hạn chế đã có từ trước (ghi trong docstring `ingest/market_data.py`), không phải lỗi Docker.
+### Nạp lại file nguồn định kỳ — cơ chế vintage (`ingest/versioning.py`, mới 2026-08-09)
+
+**Không còn phải tự đặt `--data-version` mỗi lần nạp.** Mặc định `--snapshot delta`:
+
+- bản CHẠY `v1` luôn là bản mới nhất — ngày mới append, giá trị bị revise được cập nhật + đóng dấu `revised_at`;
+- giá trị CŨ bị ghi đè được **chép sang nhãn archive** `<prefix>_pre_<YYYYMMDD>` TRƯỚC khi ghi đè → tái lập được "hôm đó ta biết gì";
+- mỗi lần nạp ghi một dòng vào sổ `data_versions` (bảng này trước đây **chết**, 0 dòng, không script nào ghi);
+- mọi đường đọc hiện có không đổi (`load_series` mặc định `v1` = mới nhất) — đây là lý do chọn delta thay vì snapshot đầy đủ.
+
+`--snapshot full` giữ thêm bản sao TOÀN BỘ dưới nhãn `<prefix>_<YYYYMMDD>` nếu cần vintage tuyệt đối.
+
+**Vì sao không phải "chỉ append ngày mới"** — đo trên DB sống 2026-08-09, so vintage cũ (hết 2026-06-29) với file mới (hết 2026-08-03), phần chồng lấp 45.465 hàng:
+
+| cửa sổ | hàng đổi |
+|---|---|
+| trước 2025-03 | **0 / 44.007** — lịch sử sâu đóng băng thật |
+| 2025-03 → nay | 126 / 1.458 (8.6%) |
+| riêng 2026 | **108 / 540 (20%)** |
+
+42 NGÀY bị tính lại, giống hệt ở cả 3 series → C-I tính lại trọn ngày, không phải làm tròn. median |Δ| = **42.9 điểm** trên thang ~300, max 130.7 (`GPRD_ACT 2026-06-24: 293.8 → 163.1`). Monthly: 520 giá trị đổi, cùng cửa sổ 2025-03 → 2026-06. Nên append-only sẽ giữ giá trị sai ở đúng 15 tháng gần nhất; còn snapshot đầy đủ thì chép 45.570 hàng để giữ 126 hàng thật sự khác (0,28%).
+
+**Lỗ point-in-time đã vá cùng lúc:** `load_series(as_of=)` và `store.load_jump_series` giờ lọc **hai đồng hồ** — `available_at <= as_of` (nội dung) VÀ `loaded_at <= as_of` (vintage). Thiếu vế thứ hai thì replay quá khứ dùng giá trị đã revise về sau = look-ahead trên trục revise. Với đường sống (`as_of=now`) điều kiện này là no-op.
+
+⚠️ Còn lại: `ingest/market_data.py` (FRED) **chưa nối** vào cơ chế này — vẫn `--data-version v1` UPSERT đè như cũ.
 
 ## Bản đồ code
 
@@ -287,7 +522,7 @@ Cascade 3 tầng (nguyên tắc #8) ánh xạ thẳng vào cây thư mục — �
 - `econometrics/local_projection.py` — LP dùng chung cho cả hai tầng. Hai chế độ suy diễn: `inference="hac"` (mặc định, bản cũ) và `inference="lag_augmented"` (MO-PM 2021 — **tự thêm lag của cả y lẫn shock**, HC1 thay HAC; thiếu lag của SHOCK là sụp cơ sở bỏ HAC, nên đừng tự ghép tay qua `controls`). `simultaneous=True` cho dải sup-t: đọc "IRF vượt 0 ở h=7" từ dải pointwise trên 25 horizon là đọc sai — ~2,5 điểm nằm ngoài ngay cả khi model đúng. **`simultaneous` CHỈ hợp lệ với `lag_augmented`** (Ω là EHW; ghép với SE HAC = hai bộ sai số chuẩn trong một dải) — raise. Với `return_all=True` trả `supt_c` **riêng cho từng hệ số**. `method="quantile"` cho τ; sup-t + quantile raise `NotImplementedError` (cần bootstrap).
 - `econometrics/shock_axis.py` — **cổng máy của `DEC-2026-08-02-shock-axis`**: `gate_shock_eligibility(measure, inference)`. LEVEL/LEVEL+JUMP **chỉ eligible với `lag_augmented`** — đó là điều kiện làm quyết định A không phá #9. Nới cổng cho `hac` = rút lại chữ ký; `test_shock_axis_gate_matches_signed_decision` bắt. Còn chứa **cổng NHÃN** của spec kép (`check_component_labelling`): gọi `β_ANTICIPATED` là "cú sốc" → raise. Đó là Guard P1 cho **nhãn** thay vì cho **số** — spec kép không phá #9 nhờ cách gọi tên, không nhờ công thức.
 - `econometrics/shocks.delta_decomposition` — **spec kép `docs/16` §2.2**: `Δ LEVEL = ANTICIPATED + SURPRISE`. **SURPRISE ≡ `innovation()`** (vì `Ê[Δlevel] = Ê[level] − level₋₁`) nên ANTICIPATED lấy bằng hiệu → hai thành phần cộng lại bằng *đúng* Δ LEVEL, không thể lệch do hai đường ước lượng. Phân rã trên **sai phân**, KHÔNG dùng `persistent_ar` (= Ê[LEVEL], gần nghiệm đơn vị → quay lại vấn đề #9). So hai hệ số **bắt buộc** qua `standardized_contribution` — `Var(ANT)/Var(SUR)≈0.1` nên hệ số thô không so được (E2: 48.9% ô đảo chiều).
-- `econometrics/multiplicity.py` — **M10, bội giữa OUTCOME**: `holm()` + `holm_by_family()`. Chiều **horizon đã do sup-t xử lý** — phạt lại ở đây là mất hết power. Một hàng = một kiểm định = một (outcome, shock) trên CẢ đường IRF, **không phải** một (outcome, shock, horizon); truyền cả 25 horizon vào là phạt chiều horizon lần thứ hai. `family` bắt buộc khai báo (governance §6.6 chưa ký); họ phải phân hoạch + phủ hết, thiếu là raise.
+- `econometrics/multiplicity.py` — **M10, bội giữa OUTCOME**: `holm()` + `holm_by_family()`. Chiều **horizon đã do sup-t xử lý** — phạt lại ở đây là mất hết power. Một hàng = một kiểm định = một (outcome, shock) trên CẢ đường IRF, **không phải** một (outcome, shock, horizon); truyền cả 25 horizon vào là phạt chiều horizon lần thứ hai. `family` bắt buộc khai báo (governance §6.6 chưa ký); họ phải phân hoạch + phủ hết, thiếu là raise. **`grid_null_check()` (2026-08-09)** trả lời câu KHÁC: không phải "ô nào sống sót" mà "toàn lưới có nhiều hơn nhiễu thuần không" — so số bác bỏ thô với `n·α`. Hai câu này cho kết luận ngược nhau khi số kiểm định lớn còn họ thì nhỏ (T2_full: 15 ô "sống sót" nhưng 34 < 43.2 kỳ vọng null). Gọi trên TOÀN BỘ p-value focal của lưới, không phải trên một họ. `z_indep` là cận dưới của |z| thật — đọc dấu và độ lớn xấp xỉ, KHÔNG báo cáo như p-value.
 
 Chân B (đường LLM, docs/15 tầng 2 — phân công: **LLM đo và diễn đạt, công thức truyền dẫn**):
 

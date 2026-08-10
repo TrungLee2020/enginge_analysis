@@ -86,30 +86,41 @@ def load_jump_series(engine: "Engine", as_of: pd.Timestamp) -> pd.Series:
     Chi dung hang co `available_at <= as_of` — dung `date` lam proxy la
     look-ahead bias (CLAUDE.md #11, khop `ingest/gpr_daily.py`).
 
-    `ext_series` PK la (series_id, date, data_version) — MOI LAN tai lai file
-    GPR va gan `data_version` moi (khuyen nghi da dua ra: "moi lan tai lai =
-    mot data_version moi") se tao THEM mot hang cho CUNG mot date. Khong loc,
-    truy van se tra ve hang TRUNG NGAY — series dua vao `shocks.jump()` (rolling
-    window tren VI TRI hang, khong phai tren ngay lich) se dem trung ngay
-    nhieu lan va lam sai het cua so rolling. `DISTINCT ON (date) ... ORDER BY
-    date, loaded_at DESC` lay dung ban ghi MOI NAP GAN NHAT cho moi ngay.
+    `ext_series` PK la (series_id, date, data_version) — `ingest/versioning.py`
+    archive ban CU bi ghi de sang mot nhan vintage rieng, nen mot `date` co the
+    co NHIEU hang (ban chay + cac ban da bi thay the). Khong loc, truy van se tra
+    ve hang TRUNG NGAY — series dua vao `shocks.jump()` (rolling window tren VI
+    TRI hang, khong phai tren ngay lich) se dem trung ngay nhieu lan va lam sai
+    het cua so rolling. `DISTINCT ON (date) ... ORDER BY date, loaded_at DESC`
+    lay dung ban ghi MOI NAP GAN NHAT cho moi ngay.
+
+    Loc `data_version = RUNNING_VERSION`: day la duong SONG (as_of = now) nen
+    ban dang chay LUON la ban dung. Cac nhan archive chi phuc vu replay lich su
+    — do la viec cua `econometrics.dataset.load_series(revision_aware=True)`,
+    khong phai cua ham nay. Khong loc thi archive lot vao va `DISTINCT ON` phai
+    phan xu giua cac hang co `loaded_at` bang nhau (archive va ban moi duoc ghi
+    trong cung mot transaction) — khong xac dinh.
     """
     from sqlalchemy import text
 
     from ..econometrics.shocks import jump as compute_jump
+    from ..ingest.versioning import RUNNING_VERSION
 
     start = (as_of - pd.Timedelta(days=JUMP_HISTORY_DAYS)).date()
     sql = text("""
         SELECT date, value FROM (
             SELECT DISTINCT ON (date) date, value
             FROM ext_series
-            WHERE series_id = 'GPRD' AND date >= :start AND available_at <= :as_of
+            WHERE series_id = 'GPRD' AND date >= :start
+              AND available_at <= :as_of
+              AND data_version = :rv
             ORDER BY date, loaded_at DESC
         ) latest
         ORDER BY date
     """)
     with engine.connect() as conn:
-        df = pd.read_sql(sql, conn, params={"start": start, "as_of": as_of.to_pydatetime()})
+        df = pd.read_sql(sql, conn, params={"start": start, "rv": RUNNING_VERSION,
+                                            "as_of": as_of.to_pydatetime()})
     if df.empty:
         return pd.Series(dtype=float)
     s = pd.Series(df["value"].to_numpy(), index=pd.to_datetime(df["date"], utc=True))

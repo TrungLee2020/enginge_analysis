@@ -30,8 +30,25 @@ import argparse
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-# Ten cot THAT trong file -> series_id dung trong ext_series (CA daily lan monthly,
-# cung schema). Xac minh tren file that 2026-08-05 — xem docs/16 §1.
+from .versioning import RUNNING_VERSION, add_version_args, apply_snapshot
+
+# Ten cot THAT trong file -> series_id dung trong ext_series. Xac minh tren file
+# that 2026-08-05 — xem docs/16 §1.
+#
+# ⚠️ Day la ten cua ban DAILY. Ban MONTHLY phai mang hau to `_M` (xem
+# `series_id_for`). Ly do — bug that, phat hien 2026-08-09 khi nap lan dau len
+# Postgres SONG (truoc do module nay chi co test mock DB):
+#   `ext_series` PK la (series_id, date, data_version) — KHONG CO `freq`. File
+#   daily va monthly cua AI-GPR dung CHUNG bo ten cot, va moi ngay dau thang co
+#   mat o CA HAI -> cung PK -> ghi de lan nhau. Nap `--freq both` thi monthly
+#   chay sau va thang: 11.186 hang (799 ngay dau thang x 14 series) mang gia tri
+#   THANG nam trong mot chuoi duoc danh dau `freq='daily'`.
+#   Am tham hoan toan: gia tri thang ~ trung binh cua thang nen CUNG THANG DO
+#   voi gia tri ngay (avg ngay-dau-thang 212 vs ngay khac 213) — bieu do khong
+#   he lo ra. Vi du that: AIGPR_OIL 2026-03-01 = 1844.10 (gia tri THANG 3) trong
+#   khi gia tri NGAY 2026-03-01 la 610.53.
+#   Quy uoc cua repo von la ten RIENG theo tan suat (GPRD/GPRD_ACT daily vs
+#   GPR/GPRT/GPRC_* monthly) — AI-GPR pha quy uoc do, nay sua lai cho khop.
 AI_GPR_COLUMNS: dict[str, str] = {
     "GPR_AI": "AIGPR",
     "GPR_AER": "AIGPR_AER",
@@ -49,8 +66,30 @@ AI_GPR_COLUMNS: dict[str, str] = {
     "GPR_OIL_NorthSea": "AIGPR_OIL_NORTHSEA",
 }
 
-DEFAULT_PATH_DAILY = "data/ai_gpr_data_daily.csv"
-DEFAULT_PATH_MONTHLY = "data/ai_gpr_data_monthly.csv"
+# Hau to cua ban MONTHLY trong ext_series. Xem canh bao o AI_GPR_COLUMNS.
+MONTHLY_SUFFIX = "_M"
+
+
+def series_id_for(column: str, freq: str) -> str:
+    """Ten cot trong file -> series_id trong ext_series, TACH theo tan suat.
+
+    Bat buoc phai tach: PK cua ext_series khong chua `freq` nen dung chung ten
+    la hai tan suat ghi de len nhau o moi ngay dau thang (bug 2026-08-09).
+    """
+    if freq not in ("daily", "monthly"):
+        raise ValueError(f"freq phai la 'daily' hoac 'monthly', nhan {freq!r}")
+    base = AI_GPR_COLUMNS[column]
+    return base if freq == "daily" else f"{base}{MONTHLY_SUFFIX}"
+
+
+def series_ids(freq: str) -> list[str]:
+    """Toan bo series_id cua mot tan suat."""
+    return [series_id_for(c, freq) for c in AI_GPR_COLUMNS]
+
+
+# Thu muc doi 2026-08-08 (commit e3bde3b): data/*.csv -> data/AI-GPRs/*.csv.
+DEFAULT_PATH_DAILY = "data/AI-GPRs/ai_gpr_data_daily.csv"
+DEFAULT_PATH_MONTHLY = "data/AI-GPRs/ai_gpr_data_monthly.csv"
 
 # Do tre publish — GIA DINH THAN TRONG, CHUA VERIFY voi vintage that (cung tinh
 # trang thai voi PUBLISH_LAG_DAYS cua ingest/gpr_daily.py va gpr_monthly.py).
@@ -119,9 +158,13 @@ def available_at(dates: pd.Series, freq: str) -> pd.Series:
 
 
 def to_long(df: pd.DataFrame, freq: str, source_version: str, data_version: str) -> pd.DataFrame:
+    # `load_dataframe` da doi ten cot sang series_id BAN DAILY; ban monthly gan
+    # them hau to de khong dung PK voi ban daily (xem `series_id_for`).
     series_cols = list(AI_GPR_COLUMNS.values())
     long = df.melt(id_vars=["date"], value_vars=series_cols,
                    var_name="series_id", value_name="value")
+    if freq == "monthly":
+        long["series_id"] = long["series_id"] + MONTHLY_SUFFIX
     long["freq"] = freq
     long["source"] = f"ai_gpr_{freq}_file"
     long["available_at"] = available_at(long["date"], freq)
@@ -147,9 +190,24 @@ def upsert(long: pd.DataFrame, dsn: str) -> int:
 
 
 def ingest_one(path: str, freq: str, dsn: str, source_version: str, data_version: str) -> int:
+    """UPSERT tho vao MOT data_version (khong archive ban cu).
+
+    Giu lai vi da co test khoa; duong chinh la `ingest_one_versioned` — no moi
+    la cai bat duoc revise (AI-GPR cung tinh lai hoi to nhu GPR goc).
+    """
     df = load_dataframe(path)
     long = to_long(df, freq, source_version, data_version)
     return upsert(long, dsn)
+
+
+def ingest_one_versioned(path: str, freq: str, dsn: str, source_version: str,
+                         *, mode: str = "delta",
+                         running_version: str = RUNNING_VERSION):
+    df = load_dataframe(path)
+    long = to_long(df, freq, source_version, running_version)
+    return apply_snapshot(long, dsn, prefix=f"ai_gpr_{freq}",
+                          description=f"AI-GPR {freq} {source_version}",
+                          mode=mode, running_version=running_version)
 
 
 def main():
@@ -160,17 +218,17 @@ def main():
     ap.add_argument("--dsn", required=True, help="postgresql://user:pass@host/db")
     ap.add_argument("--source-version-daily", default="ai_gpr_daily_202608")
     ap.add_argument("--source-version-monthly", default="ai_gpr_monthly_202608")
-    ap.add_argument("--data-version", default="v1")
+    add_version_args(ap)
     args = ap.parse_args()
 
-    if args.freq in ("daily", "both"):
-        n = ingest_one(args.path_daily, "daily", args.dsn,
-                       args.source_version_daily, args.data_version)
-        print(f"Upserted {n} daily rows across {len(AI_GPR_COLUMNS)} series | {args.path_daily}")
-    if args.freq in ("monthly", "both"):
-        n = ingest_one(args.path_monthly, "monthly", args.dsn,
-                       args.source_version_monthly, args.data_version)
-        print(f"Upserted {n} monthly rows across {len(AI_GPR_COLUMNS)} series | {args.path_monthly}")
+    for freq, path, sv in (("daily", args.path_daily, args.source_version_daily),
+                           ("monthly", args.path_monthly, args.source_version_monthly)):
+        if args.freq not in (freq, "both"):
+            continue
+        rep = ingest_one_versioned(path, freq, args.dsn, sv, mode=args.snapshot,
+                                   running_version=args.running_version)
+        print(f"AI-GPR {freq} | {len(AI_GPR_COLUMNS)} series | {path}")
+        print(rep.summary())
 
 
 if __name__ == "__main__":

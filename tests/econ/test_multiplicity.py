@@ -15,6 +15,7 @@ import pytest
 
 from gpr_engine.econometrics.multiplicity import (
     PREREGISTERED_OUTCOME_FAMILIES,
+    grid_null_check,
     holm,
     holm_by_family,
 )
@@ -144,3 +145,75 @@ def test_no_default_family_exists():
     import inspect
     sig = inspect.signature(holm_by_family)
     assert sig.parameters["family"].default is inspect.Parameter.empty
+
+
+# ---------------------------------------------------------------------------
+# grid_null_check — doi chieu MUC LUOI voi null toan cuc
+# ---------------------------------------------------------------------------
+def test_grid_expected_is_n_times_alpha():
+    """E[bac bo] = n*alpha. Ky vong CONG TINH — dung bat ke tuong quan."""
+    chk = grid_null_check(np.full(432, 0.5), alpha=0.10)
+    assert chk.n_tests == 432
+    assert chk.expected == pytest.approx(43.2)
+    assert chk.observed == 0
+    assert chk.ratio == pytest.approx(0.0)
+
+
+def test_grid_nan_pvalues_not_counted_as_tests():
+    """Spec khong hoi tu (NaN) khong phai mot kiem dinh — khong duoc phong n."""
+    p = [0.01] * 10 + [np.nan] * 90
+    chk = grid_null_check(p, alpha=0.10)
+    assert chk.n_tests == 10
+    assert chk.expected == pytest.approx(1.0)
+    assert chk.observed == 10
+
+
+def test_grid_verdict_below_expectation_blocks_reading_holm_survivors():
+    """Ca T2_full_f2579b30928f that: 432 kiem dinh focal, 34 bac bo, ky vong 43.2.
+
+    Quan sat DUOI ky vong -> khong duoc doc cac o song sot Holm nhu phat hien.
+    Do la ca ma ham nay sinh ra de bat, nen phai co trong test.
+    """
+    p = np.concatenate([np.full(34, 0.01), np.full(432 - 34, 0.5)])
+    chk = grid_null_check(p, alpha=0.10)
+    assert chk.observed == 34
+    assert chk.expected == pytest.approx(43.2)
+    assert chk.ratio < 1.0
+    assert chk.z_indep < 0
+    assert chk.verdict.startswith("DUOI ky vong null")
+
+
+def test_grid_verdict_three_regimes():
+    n = 400
+    below = grid_null_check(np.concatenate([np.full(10, 0.01), np.full(n - 10, 0.5)]))
+    noisy = grid_null_check(np.concatenate([np.full(45, 0.01), np.full(n - 45, 0.5)]))
+    clear = grid_null_check(np.concatenate([np.full(120, 0.01), np.full(n - 120, 0.5)]))
+    assert below.verdict.startswith("DUOI")
+    assert noisy.verdict.startswith("TREN ky vong null nhung trong khoang nhieu")
+    assert clear.verdict.startswith("TREN ky vong null ro ret")
+    assert noisy.z_indep < 1.64 <= clear.z_indep
+
+
+def test_grid_empty_input_raises():
+    """Khong con p-value nao thi im lang tra 0 la sai — phai bao."""
+    with pytest.raises(ValueError, match="khong co p-value"):
+        grid_null_check([np.nan, np.nan])
+
+
+def test_grid_rejects_out_of_range_inputs():
+    with pytest.raises(ValueError, match=r"\[0,1\]"):
+        grid_null_check([0.5, 1.4])
+    with pytest.raises(ValueError, match="alpha"):
+        grid_null_check([0.5], alpha=1.5)
+
+
+def test_grid_and_holm_answer_different_questions():
+    """Holm co the 'song sot' trong khi luoi nam duoi ky vong null.
+
+    Hai ket luan nguoc chieu nay ton tai duoc chinh la ly do ham grid ton tai.
+    """
+    p = np.concatenate([np.full(34, 0.001), np.full(432 - 34, 0.5)])
+    chk = grid_null_check(p, alpha=0.10)
+    surv = holm(p[:4], alpha=0.10)             # ho 4 outcome: nguong alpha/4
+    assert bool(surv["reject"].all())          # muc HO: song sot
+    assert chk.observed < chk.expected         # muc LUOI: duoi nhieu thuan

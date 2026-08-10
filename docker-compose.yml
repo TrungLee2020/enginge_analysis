@@ -16,7 +16,7 @@
 #   # host sẽ giãn ra thành CHUỖI RỖNG, --dsn "" âm thầm sai mà không báo lỗi
 #   # rõ ràng ngay):
 #   docker compose run --rm app python -m gpr_engine.ingest.gpr_daily \
-#       --path data/data_gpr_daily_recent.xls \
+#       --path "data/GPR index/data_gpr_daily_recent (1).xls" \
 #       --dsn postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
 #   docker compose up app                                    # chạy service Kafka consumer thật
 #

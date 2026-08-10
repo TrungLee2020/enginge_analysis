@@ -144,12 +144,26 @@ def _tokens(parts: list[str]) -> list[str]:
     return NUM_RE.findall(text)
 
 
+def _fake_raw_panel() -> pd.DataFrame:
+    """Panel CHUA complete-case: mot cot bat dau muon hon -> rang buoc dau mau."""
+    idx = pd.date_range("1990-01-01", periods=300, freq="MS")
+    out = pd.DataFrame({"oil": np.arange(300, dtype=float),
+                        "GPR_LEVEL": np.arange(300, dtype=float),
+                        "epu_global_LEVEL": np.arange(300, dtype=float)},
+                       index=idx)
+    out.loc[out.index < "1997-01-01", "epu_global_LEVEL"] = np.nan
+    out.loc[out.index < "1990-06-01", "GPR_LEVEL"] = np.nan
+    return out
+
+
 def _payload(families: dict) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
     gamma = _fake_gamma(families)
     holm = t2.apply_holm(gamma, families)
     panel = pd.DataFrame(np.zeros((231, 3)),
                          index=pd.date_range("2007-02-01", periods=231, freq="MS"))
-    stats = t2.compute_stats(panel, gamma, holm, None, families, elapsed=12.3)
+    cost = t2.sample_cost(_fake_raw_panel(), "1990-01-01")
+    stats = t2.compute_stats(panel, gamma, holm, None, families, elapsed=12.3,
+                             cost=cost)
     return stats, holm, gamma
 
 
@@ -209,6 +223,158 @@ def test_converged_quantile_cell_still_prints():
     md = t2.quantile_table_md(_quant_rows(converged_at=set(t2.TAUS)), "LEVEL")
     assert "‡" not in md
     assert md.count("+999.000") == len(t2.TAUS)
+
+
+# ---------------------------------------------------------------------------
+# Chi phi mau + dang control battery
+# ---------------------------------------------------------------------------
+def test_sample_binding_report_finds_the_late_column():
+    """Cot bat dau muon nhat phai dung dau — do la cot cat mau cua MOI o."""
+    rep = t2.sample_binding_report(_fake_raw_panel(), top=3)
+    assert rep.iloc[0]["column"] == "epu_global_LEVEL"
+    assert rep.iloc[0]["first_valid"] == "1997-01-01"
+
+
+def test_sample_cost_measures_months_lost():
+    cost = t2.sample_cost(_fake_raw_panel(), "1990-01-01")
+    assert cost["actual_start"] == "1997-01-01"
+    assert cost["months_lost"] == 7 * 12
+    assert cost["binding_column"] == "epu_global_LEVEL"
+
+
+def test_sample_binding_report_useless_on_complete_case_panel():
+    """Chan doan PHAI chay tren ban chua dropna.
+
+    Tren ban da complete-case moi cot cung mot first_valid — bang khong noi
+    duoc cot nao rang buoc. Test nay khoa ly do `dropna=False` ton tai.
+    """
+    rep = t2.sample_binding_report(_fake_raw_panel().dropna(), top=3)
+    assert rep["first_valid"].nunique() == 1
+
+
+def test_battery_control_names_version_a_has_no_controls():
+    assert t2.battery_control_names("LEVEL", "a") == []
+    assert t2.battery_control_names("LEVEL", "a", "same_measure") == []
+
+
+def test_battery_c_adds_policy_shock_on_top_of_b():
+    """Ban c = ban b + CU SOC chinh sach. Phai la SIEU TAP cua b, neu khong thi
+    chenh lech giua hai ban khong con doc duoc la 'do them control nay'."""
+    b = t2.battery_control_names("LEVEL", "b")
+    c = t2.battery_control_names("LEVEL", "c")
+    assert set(b) < set(c)
+    extra = set(c) - set(b)
+    assert t2.POLICY_SHOCK_COL in extra
+    assert len(extra) == 1 + t2.BATTERY_CONTROL_LAGS      # duong + lag cung do sau
+
+
+def test_unknown_battery_version_raises():
+    with pytest.raises(ValueError, match="battery="):
+        t2.battery_control_names("LEVEL", "z")
+
+
+def test_version_c_dropped_when_policy_shock_column_absent():
+    """Khong dung duoc cu soc chinh sach (mat mang/FRED) -> BO ban c, khong im
+    lang chay no voi control rong roi bao cao nhu da kiem soat."""
+    panel = pd.DataFrame({"oil": [1.0], "GPR_LEVEL": [1.0]})
+    assert t2.available_versions(panel) == ("a", "b")
+    with_mp = panel.assign(**{t2.POLICY_SHOCK_COL: [0.0]})
+    assert t2.available_versions(with_mp) == ("a", "b", "c")
+
+
+def test_battery_control_names_same_measure_matches_shock_measure():
+    """Che do cu: control di theo dung thuoc do cua shock (docs/14 §2 1a)."""
+    for m in t2.SHOCK_MEASURES:
+        names = t2.battery_control_names(m, "b", "same_measure")
+        assert names == [f"{c}_{m}" for c in t2.BATTERY_CONTROLS]
+
+
+def test_battery_control_names_level_lags_does_not_depend_on_measure():
+    """Che do mac dinh: LEVEL + p lag, GIONG NHAU o ca ba thuoc do.
+
+    Do la diem mau chot — control khong con doi theo thuoc do nen khong an
+    warm-up cua truc shock, va ba thuoc do van dung dung mot tap control.
+    """
+    per_measure = {m: t2.battery_control_names(m, "b", "level_lags")
+                   for m in t2.SHOCK_MEASURES}
+    first = per_measure[t2.SHOCK_MEASURES[0]]
+    assert all(v == first for v in per_measure.values())
+    expected = len(t2.BATTERY_CONTROLS) * (1 + t2.BATTERY_CONTROL_LAGS)
+    assert len(first) == expected == len(set(first))
+
+
+def test_battery_control_lags_match_lp_lags():
+    """Control va shock cung do sau lag — khong phai tham so tu do de do."""
+    assert t2.BATTERY_CONTROL_LAGS == t2.LAGS
+
+
+def test_build_panel_rejects_unknown_battery_mode():
+    with pytest.raises(ValueError, match="battery_mode"):
+        t2.build_panel("1990-01-01", None, False, battery_mode="whatever")
+
+
+@pytest.mark.parametrize("mode", ["level_lags", "same_measure"])
+def test_build_panel_emits_exactly_the_control_columns_requested(monkeypatch, mode):
+    """Ten control phai KHOP cot panel that sinh ra.
+
+    Lech ten thi loi no ra o sau ~5 phut uoc luong, khong phai luc dung panel —
+    nen khoa bang test thay vi bang doc ky.
+    """
+    n = 420                                   # 1990-01..2024-12: phu dev window
+    idx = pd.date_range("1990-01-01", periods=n, freq="MS")
+    rng = np.random.default_rng(0)
+    raw = pd.DataFrame({c: 100 + rng.standard_normal(n).cumsum()
+                        for c in t2.BATTERY_CONTROLS}, index=idx)
+    captured = {}
+
+    monkeypatch.setattr(t2, "load_benchmark_monthly", lambda *a, **k: raw)
+    monkeypatch.setattr(t2, "build_monthly_panel",
+                        lambda **kw: captured.setdefault("extra", kw["extra_monthly"]))
+    t2.build_panel("1990-01-01", None, False, battery_mode=mode)
+
+    cols = set(captured["extra"].columns)
+    for measure in t2.SHOCK_MEASURES:
+        want = t2.battery_control_names(measure, "b", mode)
+        assert set(want) <= cols, f"{mode}/{measure}: thiếu {set(want) - cols}"
+
+
+# ---------------------------------------------------------------------------
+# Doi chieu muc luoi — phai dung TREN bang Holm
+# ---------------------------------------------------------------------------
+def test_grid_null_section_comes_before_holm_table(families):
+    """Doc '15 o song sot' truoc roi moi doc '34 < 43.2' thi an tuong da hinh
+    thanh. Ket luan muc luoi phai den TRUOC ket luan muc o."""
+    stats, holm, gamma = _payload(families)
+    meta = {"data_version": "d", "git_commit": "g", "generated_at": "2026-08-09T10:00:00",
+            "panel_start": "2007-02-01", "panel_end": "2026-06-01",
+            "real_macro_vintage": "a", "freight_vintage": "b", "benchmark_vintage": "c"}
+    text = "\n".join(t2.build_report(stats, holm, gamma, None, families, meta))
+    i_grid = text.index("Đối chiếu mức lưới")
+    i_holm = text.index("số ô sống sót Holm")
+    assert i_grid < i_holm
+
+
+def test_grid_null_stats_match_the_focal_test_count(families):
+    """So kiem dinh cua doi chieu luoi = so kiem dinh focal, khong phai mot ho."""
+    stats, holm, _ = _payload(families)
+    assert stats["grid_n_tests"] == len(holm) == stats["n_focal_tests"]
+    assert stats["grid_observed"] == stats["n_raw_sig"]
+    assert stats["grid_expected"] == pytest.approx(round(len(holm) * t2.ALPHA, 1))
+
+
+def test_sample_section_records_battery_mode_tradeoff(families):
+    """Danh doi cua `level_lags` (JUMP phi tuyen) phai NAM TRONG report."""
+    stats, holm, gamma = _payload(families)
+    meta = {"data_version": "d", "git_commit": "g", "generated_at": "2026-08-09T10:00:00",
+            "panel_start": "2007-02-01", "panel_end": "2026-06-01",
+            "real_macro_vintage": "a", "freight_vintage": "b", "benchmark_vintage": "c"}
+    text = "\n".join(t2.build_report(stats, holm, gamma, None, families, meta,
+                                     t2.sample_binding_report(_fake_raw_panel())))
+    assert "Chi phí mẫu" in text
+    assert stats["battery_mode"] in text
+    assert "epu_global_LEVEL" in text
+    if stats["battery_mode"] == "level_lags":
+        assert "LEVEL+JUMP" in text and "ÍT HƠN" in text
 
 
 def test_converged_flag_survives_lp_to_tier2():

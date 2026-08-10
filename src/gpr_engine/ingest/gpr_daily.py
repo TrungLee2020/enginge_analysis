@@ -12,6 +12,8 @@ import argparse
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from .versioning import add_version_args, apply_snapshot
+
 SERIES = ["GPRD", "GPRD_ACT", "GPRD_THREAT"]  # 3 chuỗi cần cho chân A daily
 
 # Độ trễ publish: GPR daily của Caldara-Iacoviello tính từ báo chí ngày D, đăng lên
@@ -67,19 +69,24 @@ def upsert(long: pd.DataFrame, dsn: str) -> int:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--path", default="data/data_gpr_daily_recent.xls")
+    # Vintage 2026-08 (file trong `data/GPR index/`, phu 1985-01-01..2026-08-03).
+    # `(1)` la hau to trinh duyet them khi tai — ten that trong thu muc.
+    ap.add_argument("--path", default="data/GPR index/data_gpr_daily_recent (1).xls")
     ap.add_argument("--dsn", required=True, help="postgresql://user:pass@host/db")
-    ap.add_argument("--source-version", default="gpr_daily_recent_202606",
+    ap.add_argument("--source-version", default="gpr_daily_recent_202608",
                     help="vintage của file nguồn")
-    ap.add_argument("--data-version", default="v1")
+    add_version_args(ap)
     args = ap.parse_args()
 
     df = load_dataframe(args.path)
-    long = to_long(df, args.source_version, args.data_version)
-    n = upsert(long, args.dsn)
-    print(f"Upserted {n} rows | series={SERIES} | "
-          f"range {df['date'].min()} -> {df['date'].max()} | "
-          f"available_at = date +{PUBLISH_LAG_DAYS}d")
+    long = to_long(df, args.source_version, args.running_version)
+    rep = apply_snapshot(long, args.dsn, prefix="gpr_daily",
+                         description=f"GPR daily {args.source_version}",
+                         mode=args.snapshot,
+                         running_version=args.running_version)
+    print(f"GPR daily | series={SERIES} | range {df['date'].min()} -> "
+          f"{df['date'].max()} | available_at = date +{PUBLISH_LAG_DAYS}d")
+    print(rep.summary())
 
 
 if __name__ == "__main__":

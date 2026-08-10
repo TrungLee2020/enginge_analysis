@@ -90,6 +90,34 @@ def test_to_long_covers_all_series_with_correct_metadata(tmp_path):
     assert len(long) == 3 * len(AI_GPR_COLUMNS)
 
 
+def test_daily_and_monthly_series_ids_are_disjoint(tmp_path):
+    """Bug that 2026-08-09: hai tan suat dung CHUNG series_id.
+
+    `ext_series` PK la (series_id, date, data_version) — KHONG co `freq`. Moi
+    ngay dau thang co mat o ca file daily lan monthly, nen dung chung ten la ghi
+    de lan nhau: 11.186 hang mang gia tri THANG trong chuoi danh dau daily. Am
+    tham vi gia tri thang ~ trung binh cua thang, cung thang do voi gia tri ngay
+    (AIGPR_OIL 2026-03-01: 1844.10 thang vs 610.53 ngay).
+    """
+    from gpr_engine.ingest.ai_gpr import MONTHLY_SUFFIX, series_ids
+
+    p = tmp_path / "x.csv"
+    _write(p, n=3)
+    df = load_dataframe(str(p))
+    d = set(to_long(df, "daily", "sv", "v1")["series_id"])
+    m = set(to_long(df, "monthly", "sv", "v1")["series_id"])
+    assert d & m == set(), f"series_id trung giua hai tan suat: {sorted(d & m)}"
+    assert m == {f"{s}{MONTHLY_SUFFIX}" for s in d}
+    assert set(series_ids("daily")) == d and set(series_ids("monthly")) == m
+
+
+def test_series_id_for_rejects_unknown_freq():
+    from gpr_engine.ingest.ai_gpr import series_id_for
+
+    with pytest.raises(ValueError, match="freq phai la"):
+        series_id_for("GPR_AI", "weekly")
+
+
 def test_upsert_sends_conflict_safe_sql_via_mocked_engine():
     long = pd.DataFrame([{
         "series_id": "AIGPR", "date": pd.Timestamp("2020-01-01").date(), "value": 1.0,
