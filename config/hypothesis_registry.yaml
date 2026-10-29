@@ -249,6 +249,34 @@ decisions:
       Kết quả γ dưới bản c vẫn phải qua human review như mọi bảng γ khác.
     blocked_by: null
 
+  - id: DEC-2026-10-29-role-init   # w(role) thêm 2 role khởi tạo
+    decided: "2026-10-29"
+    by: "user (chỉ đạo 'bạn đề xuất là làm thôi', phiên 2026-10-29 — bàn giao bộ thu tin GPR)"
+    what: >
+      Thêm hai role vào `indices/s_gpr.py::DEFAULT_ROLE_WEIGHTS_INIT`, giá trị
+      KHỞI TẠO theo thứ bậc của docs/00 §2.5 (nguyên thủ 1.0 > bộ trưởng 0.6 >
+      phát ngôn viên 0.4; thống đốc NHTW 0.8 kênh tài chính):
+        vice_president = 0.8   — dưới nguyên thủ, trên bộ trưởng;
+        official_unnamed = 0.3 — "quan chức giấu tên" nguồn tin báo chí trích
+                                 dẫn, dưới phát ngôn viên (không ai đứng tên).
+      Bộ thu tin (repport_v2 collect_gpr.py) gán role từ bài báo; role ngoài
+      bảng vẫn bị GIỮ ở collector, không ép sang role khác.
+    why: >
+      Bộ tin chuẩn 19-29/10/2026 có hai phát ngôn rơi ra ngoài 4 role cũ: thư
+      của Phó Tổng thống Vance gửi Iran (Semafor, 29/10) và cảnh báo của "quan
+      chức Mỹ" với các nước vùng Vịnh (WSJ, 28/10). Không có role thì engine
+      raise KeyError ở w(role) và tin bị loại khỏi S-GPR/Ladder hoàn toàn.
+    conditions:
+      - "Đây là giá trị KHỞI TẠO (#7), không phải trọng số cuối — giá trị cuối
+         phải ước lượng từ event study (speaker fixed-effects) như 4 role cũ."
+      - "Thêm role khác (đặc phái viên, nghị sĩ, tướng lĩnh...) là quyết định
+         MỚI cần chữ ký riêng; test_role_init_decision_matches_code khóa đúng
+         bộ 6 role này."
+    not_yet_decided: >
+      Đặc phái viên (envoy, ví dụ Witkoff) chưa có role — collector đang giữ
+      lại các phát ngôn đó (`held/role_not_in_engine`).
+    blocked_by: null
+
 # Dữ liệu còn thiếu chặn các nhánh (docs/14 §2 1c) — KHÔNG phải việc code:
 data_blockers:
   ai_gpr_data_unverified: >

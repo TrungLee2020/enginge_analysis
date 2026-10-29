@@ -41,7 +41,18 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-09)
+## Trạng thái hiện tại (cập nhật 2026-10-29)
+
+### 📰 Engine có nguồn tin đầu vào + chân C được ingest (chưa nối Ladder)
+
+Trước 2026-10-29 **không hệ thống nào ghi vào `gpr.news.raw`** — `run_news_service.py` chưa từng nhận tin. Producer đầu tiên là bộ thu tin GPR của `repport_v2` (`collect_gpr.py`, docs ở `repport_v2/docs/gpr_collector.md`): GDELT + tìm kiếm theo sự kiện qua `search_core` + Claude tách phát ngôn → `Statement` đúng schema. Phát ngôn có role ngoài `w(role)` hoặc `published_at` 00:00 bị **giữ ở collector** kèm lý do, không gửi.
+
+- **`DEC-2026-10-29-role-init`**: `w(role)` thêm `vice_president` 0.8 và `official_unnamed` 0.3 — giá trị KHỞI TẠO theo thứ bậc (#7), khóa bằng `test_role_init_decision_matches_code`. Lý do: bộ tin chuẩn 19-29/10 có thư của Vance (Semafor) và "quan chức Mỹ" (WSJ) — không có role thì tin bị loại khỏi S-GPR/Ladder. Đặc phái viên (envoy) vẫn chưa có role.
+- **`ingest/gdelt_events.py` (mới)**: slot 15 phút của GDELT 2.0 Events do collector ghi (`data/gdelt_events/`) → 6 chuỗi daily (`GDELT_EVENTS_N`, `GDELT_QUAD3_SHARE`, `GDELT_QUAD4_SHARE` + bản `WATCH_*` cho các nước theo dõi) vào `ext_series` qua cơ chế vintage. Ngày thiếu slot (< 92/96) bị bỏ, không nạp số thấp giả. `available_at` = hết ngày + 1 giờ.
+- **⚠️ CHƯA nối vào Escalation Ladder**: `news_pipeline._pair_indicator_frame` vẫn để `quad3_pct/quad4_pct` = NaN. Chân C là lớp mới → phải qua cổng incremental IC (#6, #1) trước. Khi qua: phân vị expanding strict `<` qua `load_series(as_of=...)`; ngưỡng đã có trong `config/ladder_v1.yaml`.
+- **Môi trường test**: venv dựng mới kéo `statsmodels 0.15` (bỏ `old_names` → 36 test `shocks`/`dual_component` đỏ) và `pandas 3`. Dùng `statsmodels<0.15`, `pandas<3`, `numpy<2.4` → 516 pass.
+
+## Trạng thái trước đó (2026-08-09)
 
 ### 🐛 Bug data model THẬT, lộ ra ở lần nạp Postgres SỐNG đầu tiên: AI-GPR daily/monthly ghi đè nhau
 
@@ -455,6 +466,7 @@ python -m gpr_engine.ingest.market_data   --dsn "$DSN" --source fred   # BRENT/D
 python -m gpr_engine.ingest.macro_monthly --dsn "$DSN"                 # IP/CPI/INFL_EXP/EPU/FREIGHT (monthly)
 python -m gpr_engine.ingest.ai_gpr --dsn "$DSN" \
     --path-daily data/AI-GPRs/ai_gpr_data_daily.csv --path-monthly data/AI-GPRs/ai_gpr_data_monthly.csv
+python -m gpr_engine.ingest.gdelt_events --dsn "$DSN" --path data/gdelt_events   # chân C, slot do collector repport_v2 ghi
 ```
 
 **Chạy pipeline serving thật** (sau khi đã ingest ở trên — cần γ đã có ở `docs/reports/data/t2_full_holm_*.csv`, tức đã chạy `run_t2_full.py` ít nhất một lần):
