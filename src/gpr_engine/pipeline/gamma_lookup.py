@@ -19,6 +19,7 @@ thanh phan dai dang; Act chi tac dong khi bat ngo".
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -29,6 +30,15 @@ from ..scoring.statement_scorer import COMMITMENTS
 
 DEFAULT_REPORTS_DIR = Path("docs/reports")
 DEFAULT_GAMMA_GLOB = "data/t2_full_holm_*.csv"
+# Bang gamma DANG PHUC VU — ghim tuong minh, khong suy tu mtime/ten.
+# `3e1bd83a02b8_cb1a51` = data_version 3e1bd83a02b8 + spec_version cb1a51
+# (`run_t2_full._spec_version`, ban co battery c — DEC-2026-08-09-policy-shock-
+# control). Hai file con lai la ban cu: `f2579b30928f` (Phase 1a, 231 thang,
+# truoc vintage 2026-08-09) va `3e1bd83a02b8` tran (dung lai bang
+# `restore_t2_legacy_csv.py` de khop report cu, truoc khi ten co spec_version).
+# Doi bang gamma = sua hang so nay (hoac dat GPR_GAMMA_FILE) CO CHU DICH.
+DEFAULT_GAMMA_FILE = "t2_full_holm_3e1bd83a02b8_cb1a51.csv"
+GAMMA_FILE_ENV = "GPR_GAMMA_FILE"
 GAMMA_CHANNELS = ("pooled", "act", "threat")
 
 _COMMITMENT_TO_CHANNEL = {
@@ -49,24 +59,56 @@ def commitment_to_gamma_channel(commitment: str) -> str:
     return _COMMITMENT_TO_CHANNEL[commitment]
 
 
-def _latest_gamma_file(reports_dir: Path, glob_pattern: str) -> Path:
-    files = list(reports_dir.glob(glob_pattern))
+def _resolve_pin(reports_dir: Path, pin: str) -> Path:
+    """Ten file ghim -> duong dan. Ten tran (khong co thu muc) hieu la nam
+    trong `data/` cua reports_dir — cung cho voi DEFAULT_GAMMA_GLOB."""
+    p = Path(pin)
+    if not p.is_absolute() and len(p.parts) == 1:
+        p = Path("data") / p
+    return reports_dir / p
+
+
+def _latest_gamma_file(reports_dir: Path, glob_pattern: str,
+                       gamma_file: str | None = None) -> Path:
+    """Chọn bảng γ MỘT CÁCH TƯỜNG MINH — không bao giờ "file mới nhất".
+
+    Thứ tự: tham số `gamma_file` → biến môi trường `GPR_GAMMA_FILE` →
+    `DEFAULT_GAMMA_FILE`. Ghim tường minh (tham số/env) mà file không có thì
+    raise. Ghim mặc định không có trong `reports_dir` (vd thư mục test) thì
+    rơi về glob, nhưng CHỈ chấp nhận khi khớp đúng MỘT file — ≥2 file mà
+    không có ghim nào trỏ được là raise, không đoán.
+
+    Bug đã vá (pre-deploy 2026-10-30): bản trước chọn `max(st_mtime)`. Trong
+    git có 3 file `t2_full_holm_*.csv`; trên clone mới / `COPY` của Docker,
+    mtime là THỨ TỰ CHECKOUT chứ không phải thời điểm tạo bảng — có thể phục
+    vụ bảng γ cũ mà không dấu hiệu gì. Trước nữa là `sorted()[-1]` (theo hash,
+    cũng sai). Hash nội dung không mang thứ tự thời gian, nên "mới nhất" chỉ
+    xác định được bằng con người ghim.
+    """
+    explicit = gamma_file or os.environ.get(GAMMA_FILE_ENV) or None
+    if explicit:
+        path = _resolve_pin(reports_dir, explicit)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Bảng γ được ghim ({explicit!r}) không tồn tại: {path}. "
+                f"Sửa {GAMMA_FILE_ENV} hoặc tham số gamma_file.")
+        return path
+    default = _resolve_pin(reports_dir, DEFAULT_GAMMA_FILE)
+    if default.is_file():
+        return default
+    files = sorted(reports_dir.glob(glob_pattern))
     if not files:
         raise FileNotFoundError(
             f"Không thấy {glob_pattern} trong {reports_dir}. Chạy "
             "`python scripts/run_t2_full.py` trước — pipeline đọc từ bảng γ đã "
             "công bố, không tự ước lượng lại (docs/14 §8).")
-    # Bug đã vá (audit production-readiness 2026-08-05): tên file là
-    # `t2_full_holm_<content-hash>.csv` (docs/g0 quy ước versioned report,
-    # không GHI ĐÈ mỗi lần chạy lại `run_t2_full.py`) — hash KHÔNG mang thứ
-    # tự thời gian. `sorted(files)[-1]` cũ sắp xếp theo CHUỖI TÊN FILE (tức
-    # theo hash), không phải theo thời điểm tạo — khi có ≥2 file khớp
-    # glob_pattern, "file cuối cùng theo alphabet" có thể là file CŨ HƠN,
-    # chọn sai γ mà không có dấu hiệu nào (không raise, không log). Rủi ro
-    # thật khi `run_t2_full.py` được chạy lại nhiều lần theo thời gian (đúng
-    # kịch bản dữ liệu GPR mới về định kỳ) — sắp theo `st_mtime` (thời điểm
-    # sửa file gần nhất) mới đúng nghĩa "mới nhất".
-    return max(files, key=lambda p: p.stat().st_mtime)
+    if len(files) > 1:
+        raise RuntimeError(
+            f"{len(files)} bảng γ khớp {glob_pattern} trong {reports_dir} "
+            f"({[f.name for f in files]}) mà không có ghim nào: đặt "
+            f"{GAMMA_FILE_ENV}=<tên file> (hoặc sửa DEFAULT_GAMMA_FILE). "
+            "Không tự chọn theo mtime/tên — clone mới làm mtime vô nghĩa.")
+    return files[0]
 
 
 def gamma_from_artifact(
@@ -124,6 +166,7 @@ def load_published_gamma(
     reports_dir: Path | str = DEFAULT_REPORTS_DIR,
     glob_pattern: str = DEFAULT_GAMMA_GLOB,
     panel: pd.DataFrame | None = None,
+    gamma_file: str | None = None,
 ) -> tuple[list[GammaCell], str]:
     """O gamma DA SONG SOT (Holm + battery b) cho MOT channel cua bang gamma.
 
@@ -139,12 +182,15 @@ def load_published_gamma(
         docstring nay chu khong bia so). Day la gioi han co chu dich cua V1,
         khong phai loi — xem "Ngoai pham vi V1" trong ke hoach da duyet.
 
+    gamma_file: ghim ten file bang gamma (xem `_latest_gamma_file`); None thi
+        lay GPR_GAMMA_FILE roi DEFAULT_GAMMA_FILE.
+
     Returns: (danh sach GammaCell, ten file da doc — vao meta.data_version).
     """
     if channel not in GAMMA_CHANNELS:
         raise ValueError(f"channel={channel!r} không thuộc {GAMMA_CHANNELS}")
 
-    path = _latest_gamma_file(Path(reports_dir), glob_pattern)
+    path = _latest_gamma_file(Path(reports_dir), glob_pattern, gamma_file)
     df = pd.read_csv(path)
     sub = df[(df["reject"]) & (df["battery"] == "b") & (df["channel"] == channel)]
     if outcomes:

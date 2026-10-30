@@ -2,10 +2,13 @@
 # Nguồn chân lý là pyproject.toml. File này giữ đồng bộ với [project.dependencies]
 # để pip install -r requirements.txt (môi trường không dùng build backend).
 # Cài đầy đủ dev: pip install -r requirements-dev.txt
+# Cận trên pandas<3, numpy<2.4, statsmodels<0.15: bộ test đã kiểm trên pandas 2.3.3 /
+# numpy 2.3.5 / statsmodels 0.14.6; major mới đổi API/kết quả số mà không báo (Dockerfile
+# cài từ file này rồi `pip install .` theo pyproject.toml — hai nơi phải khớp).
 
 # --- Data / IO ---
-pandas>=2.0
-numpy>=1.26
+pandas>=2.0,<3
+numpy>=1.26,<2.4
 openpyxl>=3.1          # đọc .xlsx
 xlrd>=2.0              # đọc .xls (file GPR daily/monthly hiện tại)
 pyyaml>=6.0
@@ -15,7 +18,7 @@ sqlalchemy>=2.0
 psycopg2-binary>=2.9
 
 # --- Econometrics (chân A: LP, panel/TVP-VAR, GARCH) ---
-statsmodels>=0.14
+statsmodels>=0.14,<0.15
 linearmodels>=6.0
 arch>=6.3
 
