@@ -1,0 +1,50 @@
+# docker-compose.prod.yml — chạy engine trên CÙNG server với repport_v2 + search_core.
+#
+# Khác docker-compose.yml (bộ dev tự dựng Postgres + Kafka riêng): file này CHỈ chạy
+# `app` (scripts/run_news_service.py) và dùng hạ tầng đang có trên mạng docker
+# `shared-infra` của repport_v2:
+#   - Kafka  : listener nội bộ `kafka:29092` (cùng giá trị repport_v2 dùng);
+#              đọc gpr.news.raw (collector repport_v2 ghi), ghi gpr.news.assessment.
+#   - Postgres: database RIÊNG `gpr_engine` trong container shared-postgres-report
+#              (cùng instance với DB `report`, không chung bảng).
+#   - GDELT  : slot do collector repport_v2 ghi ở <repport_v2>/data/gdelt_events,
+#              mount CHỈ ĐỌC vào /app/data/gdelt_events cho ingest.gdelt_events.
+#
+# Lần đầu (xem docs/deploy_shared_server.md để biết đầy đủ):
+#   docker exec shared-postgres-report psql -U postgres -c "CREATE DATABASE gpr_engine"
+#   docker exec -i shared-postgres-report psql -U postgres -d gpr_engine < sql/001_schema_core.sql
+#   docker exec -i shared-postgres-report psql -U postgres -d gpr_engine < sql/002_schema_serving.sql
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml run --rm app python -m gpr_engine.ingest.gpr_daily --dsn "<DSN>"
+#   docker compose -f docker-compose.prod.yml up -d app
+#
+# .env (cùng thư mục) BẮT BUỘC có: GPR_DB_DSN, OPENAI_API_KEY (hoặc OPENAI_BASE_URL tới
+# vLLM), GPR_TRAINING_CUTOFF. GPR_DB_DSN trỏ host `shared-postgres-report:5432`, KHÔNG
+# phải localhost (localhost trong container là chính container app).
+
+services:
+  app:
+    build: .
+    image: gpr-engine:latest
+    container_name: gpr-engine-app
+    env_file:
+      - .env
+    environment:
+      GPR_DB_DSN: ${GPR_DB_DSN:?GPR_DB_DSN chua dat trong .env — vd postgresql://postgres:<pass>@shared-postgres-report:5432/gpr_engine}
+      # Cố định, không lấy từ .env: .env.example mang giá trị mẫu host1:9092, chép
+      # nguyên sang thì consumer trỏ vào host không tồn tại mà chỉ báo lỗi kết nối.
+      # Topic giữ mặc định của run_news_service.py (gpr.news.raw -> gpr.news.assessment).
+      GPR_KAFKA_BOOTSTRAP: kafka:29092
+    volumes:
+      # File GPR/AI-GPR của engine (vintage trong repo) + cache FRED.
+      - ./data:/app/data
+      # Slot GDELT Events do collector repport_v2 ghi — chỉ đọc, engine không ghi đè.
+      - ${REPPORT_V2_DIR:-/opt/repport_v2}/data/gdelt_events:/app/data/gdelt_events:ro
+    networks:
+      - shared-infra
+    restart: unless-stopped
+
+networks:
+  shared-infra:
+    external: true
+    name: shared-infra

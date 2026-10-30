@@ -32,12 +32,15 @@ from .dataset import dlog, fill_weekend, log1p_gpr, transform_global_macro
 # `_data_version()` cua runner bam byte cua chinh hai file nay -> ten report doi
 # theo. Report cu chi tai lap duoc neu file cu con; giu file cu lai khi thay.
 #
-# Vintage hien tai (dat vao 2026-08-08, commit e3bde3b doi thu muc):
-#   daily   : 1985-01-01 -> 2026-08-03  (truoc do: .../data_gpr_daily_recent.xls, het 2026-06-29)
-#   monthly : 1900-01    -> 2026-07     (truoc do: data/data_gpr_export_202607.xls, het 2026-06)
-# `(1)` trong ten file daily la hau to trinh duyet tu them khi tai — giu nguyen
-# ten that trong thu muc, KHONG doan mot ten "sach hon" roi bao khong thay file.
-DEFAULT_GPR_DAILY = "data/GPR index/data_gpr_daily_recent (1).xls"
+# Vintage hien tai (dat vao 2026-10-30, file user tai len phien):
+#   daily   : 1985-01-01 -> 2026-10-26  sha256[:12] a4cecd9b807b
+#             (truoc do: data_gpr_daily_recent (1).xls, het 2026-08-03, a429b2431795)
+#   monthly : 1900-01    -> 2026-09     sha256[:12] 6951c529250f
+#             (truoc do: data_gpr_export_202608.xls, het 2026-07, f57e78baf651)
+# File cu GIU LAI trong data/GPR index/ de report cu tai lap duoc. Ten file moi mang
+# hau to vintage (_202610) thay cho `(1)` cua trinh duyet — doi ten la doi hang so
+# cung commit, KHONG co fallback ngam do ten file.
+DEFAULT_GPR_DAILY = "data/GPR index/data_gpr_daily_recent_202610.xls"
 DEFAULT_CACHE_DIR = "data/cache"
 
 # Thu muc con cua data/ bi BO QUA khi do tim (cache la thu muc GHI, khong phai
@@ -467,7 +470,7 @@ def build_tier2_panel(
 # default KHONG lam so lieu report doi — day la lam ro TEN, khong phai doi du
 # lieu. Neu lan sau nap file co so KHAC, phai bump `--data-version` khi ingest
 # (#4/#7), dung de trung version cu.
-DEFAULT_GPR_MONTHLY = "data/GPR index/data_gpr_export_202608.xls"
+DEFAULT_GPR_MONTHLY = "data/GPR index/data_gpr_export_202610.xls"
 
 
 DEFAULT_COUNTRY = "VNM"

@@ -16,8 +16,10 @@ data/
 
 | File | Nội dung | Phủ | Vintage (sha256[:12]) |
 |---|---|---|---|
-| `data_gpr_daily_recent (1).xls` | GPRD/GPRD_ACT/GPRD_THREAT daily, 15.190 hàng × 11 cột | 1985-01-01 → **2026-08-03** | `a429b2431795` |
-| `data_gpr_export_202608.xls` | 44 nước monthly, 1.519 × 115 (44 `GPRC_*` recent 1985+, 44 `GPRHC_*` historical 1900+, có `GPRC_VNM`/`GPRHC_VNM`, global GPR/GPRT/GPRA/GPRH/GPRHT/GPRHA) | 1900-01 → **2026-07** | `f57e78baf651` |
+| `data_gpr_daily_recent_202610.xls` | GPRD/GPRD_ACT/GPRD_THREAT daily, 15.274 hàng — **`DEFAULT_GPR_DAILY` từ 2026-10-30** | 1985-01-01 → **2026-10-26** | `a4cecd9b807b` |
+| `data_gpr_export_202610.xls` | 44 nước monthly, 1.521 × 115, cùng cột với bản 202608 — **`DEFAULT_GPR_MONTHLY` từ 2026-10-30** | 1900-01 → **2026-09** | `6951c529250f` |
+| `data_gpr_daily_recent (1).xls` | GPRD/GPRD_ACT/GPRD_THREAT daily, 15.190 hàng × 11 cột (vintage cũ, giữ để report cũ tái lập) | 1985-01-01 → **2026-08-03** | `a429b2431795` |
+| `data_gpr_export_202608.xls` | (vintage cũ) 44 nước monthly, 1.519 × 115 (44 `GPRC_*` recent 1985+, 44 `GPRHC_*` historical 1900+, có `GPRC_VNM`/`GPRHC_VNM`, global GPR/GPRT/GPRA/GPRH/GPRHT/GPRHA) | 1900-01 → **2026-07** | `f57e78baf651` |
 | `data_gpr_export (1).xls` | ⚠️ **Bản trùng** của file trên — kiểm 2026-08-08: giống **từng ô** trên cả 112 cột số (0 ô lệch) | 1900-01 → 2026-07 | `49eaf46fb70a` |
 
 - `data_gpr_daily_recent (1).xls` — GPRD/GPRD_ACT/GPRD_THREAT daily,
@@ -35,6 +37,12 @@ data/
 `DEFAULT_GPR_MONTHLY` trỏ `data_gpr_export_202608.xls` (tên có vintage, không nhập
 nhằng). Xóa được `data_gpr_export (1).xls` — giữ hai bản trùng chỉ làm resolver
 phải đoán.
+
+**Vintage 202610 (nạp 2026-10-30)** — đối chiếu với 202608 trên phần chồng lấp:
+daily 75/15.190 ngày bị tính lại (GPRD; ACT 72, THREAT 73), **tất cả từ 2025-03-15 trở đi**,
+median |Δ| ≈ 10 điểm, max 106; monthly 694 ô đổi, từ 2025-01. Lịch sử sâu vẫn đóng băng —
+cùng mẫu với lần đổi vintage 2026-08. Nạp DB bằng lệnh ingest mặc định, `versioning.py` sẽ
+archive đúng các giá trị bị revise.
 
 ## `AI-GPRs/` — AI-GPR (Iacoviello & Tong 2026)
 

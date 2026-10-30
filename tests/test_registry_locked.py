@@ -49,6 +49,7 @@ LOCKED_DECISION_IDS = {
     "DEC-2026-08-05-event-type-channel",  # docs/16 Task 1, EVENT_TYPE_TO_CHANNEL
     "DEC-2026-08-09-battery-control-form",  # run_t2_full.BATTERY_MODE = level_lags
     "DEC-2026-08-09-policy-shock-control",  # bản battery c = b + cú sốc chính sách
+    "DEC-2026-10-29-role-init",  # w(role) thêm vice_president / official_unnamed
 }
 REQUIRED_DECISION_FIELDS = {"id", "decided", "by", "what"}
 
@@ -258,6 +259,28 @@ def test_event_type_channel_decision_matches_code():
     assert EVENT_TYPE_TO_CHANNEL.get("terrorism") is None
     assert EVENT_TYPE_TO_CHANNEL.get("diplomatic_tension") is None
     assert EVENT_TYPE_TO_CHANNEL.get("other") is None
+
+
+def test_role_init_decision_matches_code():
+    """Chữ ký DEC-2026-10-29-role-init phải khớp DEFAULT_ROLE_WEIGHTS_INIT thật.
+
+    Bảng w(role) là đúng 6 role đã ký; thêm/bớt role hay đổi giá trị khởi tạo
+    mà không sửa chữ ký cùng commit là rút chữ ký ngầm (#7: không gán trọng số
+    người phát ngôn tùy tiện).
+    """
+    from gpr_engine.indices.s_gpr import DEFAULT_ROLE_WEIGHTS_INIT
+
+    decisions = {d["id"]: d for d in _cfg().get("decisions", [])}
+    what = str(decisions["DEC-2026-10-29-role-init"]["what"])
+    assert set(DEFAULT_ROLE_WEIGHTS_INIT) == {
+        "head_of_state", "vice_president", "minister", "spokesperson",
+        "official_unnamed", "central_bank_governor"}
+    for role in ("vice_president", "official_unnamed"):
+        assert f"{role} = {DEFAULT_ROLE_WEIGHTS_INIT[role]}" in what, (
+            f"Chữ ký không ghi {role} = {DEFAULT_ROLE_WEIGHTS_INIT[role]} — cập nhật 'what' cùng commit.")
+    # Thứ bậc khởi tạo: nguyên thủ > phó TT > bộ trưởng > phát ngôn viên > giấu tên.
+    w = DEFAULT_ROLE_WEIGHTS_INIT
+    assert w["head_of_state"] > w["vice_president"] > w["minister"] > w["spokesperson"] > w["official_unnamed"] > 0
 
 
 def test_battery_control_form_decision_matches_code():

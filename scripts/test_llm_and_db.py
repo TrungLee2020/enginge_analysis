@@ -202,7 +202,8 @@ def main() -> None:
     ap.add_argument("--speaker", default="Test Speaker")
     ap.add_argument("--speaker-role", default="minister",
                     help="Phải thuộc DEFAULT_ROLE_WEIGHTS_INIT (s_gpr.py): "
-                         "head_of_state|minister|spokesperson|central_bank_governor")
+                         "head_of_state|vice_president|minister|spokesperson|"
+                         "official_unnamed|central_bank_governor")
     ap.add_argument("--source", default="manual_test")
     ap.add_argument("--provider", default="auto",
                     choices=["auto", "openai", "vllm", "gemini"],

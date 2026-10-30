@@ -29,11 +29,15 @@ import numpy as np
 import pandas as pd
 
 # KHOI TAO theo thu bac (docs/00 §2.5) — KHONG phai trong so cuoi (#7).
-# central_bank_governor 0.8 danh cho kenh tai chinh.
+# central_bank_governor 0.8 danh cho kenh tai chinh. vice_president /
+# official_unnamed: DEC-2026-10-29-role-init (registry) — them role khac la
+# chu ky moi, khong them tai cho.
 DEFAULT_ROLE_WEIGHTS_INIT: dict[str, float] = {
     "head_of_state": 1.0,
+    "vice_president": 0.8,
     "minister": 0.6,
     "spokesperson": 0.4,
+    "official_unnamed": 0.3,
     "central_bank_governor": 0.8,
 }
 

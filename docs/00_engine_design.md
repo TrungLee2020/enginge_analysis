@@ -122,7 +122,7 @@ S-CONC_{a→b, t} = Σ_i w(role_i) · max(−v_i, 0)                  (chiều h
 S-GPR_global_t = Σ_pairs trade_weight_pair · S-GPR_pair,t
 ```
 - Không trộn hai chiều thành một số (net) — leo thang và hòa giải tác động bất đối xứng lên thị trường, giữ riêng để hệ số tự do.
-- `w(role)`: khởi tạo bằng thứ bậc đơn giản (nguyên thủ 1.0, bộ trưởng 0.6, phát ngôn viên 0.4, thống đốc NHTW 0.8 cho kênh tài chính) → thay bằng trọng số ước lượng từ event study (speaker fixed-effects, như Lớp 2b research plan) khi đủ dữ liệu intraday.
+- `w(role)`: khởi tạo bằng thứ bậc đơn giản (nguyên thủ 1.0, phó tổng thống 0.8, bộ trưởng 0.6, phát ngôn viên 0.4, quan chức giấu tên 0.3, thống đốc NHTW 0.8 cho kênh tài chính — hai role thêm 2026-10-29, `DEC-2026-10-29-role-init`) → thay bằng trọng số ước lượng từ event study (speaker fixed-effects, như Lớp 2b research plan) khi đủ dữ liệu intraday.
 - Chuẩn hóa theo số phát ngôn của nguồn trong kỳ (mỗi nguồn có nhịp đăng khác nhau).
 
 ### 2.6. Khối lượng & chi phí

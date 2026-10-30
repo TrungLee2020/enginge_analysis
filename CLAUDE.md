@@ -41,7 +41,19 @@ Kiến trúc **1 engine lõi (country-agnostic) + n bộ tham số quốc gia**.
 
 Python 3.11+, PostgreSQL, Kafka, Redis, FastAPI. Econometrics: statsmodels, linearmodels, arch, pandas, numpy. LLM scoring: OpenAI SDK (GPT-4o-mini cho backfill) + vLLM/Qwen3-14B (production nếu pass V2). Backtest: vectorbt hoặc tự viết.
 
-## Trạng thái hiện tại (cập nhật 2026-08-09)
+## Trạng thái hiện tại (cập nhật 2026-10-29)
+
+### 📰 Engine có nguồn tin đầu vào + chân C được ingest (chưa nối Ladder)
+
+Trước 2026-10-29 **không hệ thống nào ghi vào `gpr.news.raw`** — `run_news_service.py` chưa từng nhận tin. Producer đầu tiên là bộ thu tin GPR của `repport_v2` (`collect_gpr.py`, docs ở `repport_v2/docs/gpr_collector.md`): GDELT + tìm kiếm theo sự kiện qua `search_core` + Claude tách phát ngôn → `Statement` đúng schema. Phát ngôn có role ngoài `w(role)` hoặc `published_at` 00:00 bị **giữ ở collector** kèm lý do, không gửi.
+
+- **`DEC-2026-10-29-role-init`**: `w(role)` thêm `vice_president` 0.8 và `official_unnamed` 0.3 — giá trị KHỞI TẠO theo thứ bậc (#7), khóa bằng `test_role_init_decision_matches_code`. Lý do: bộ tin chuẩn 19-29/10 có thư của Vance (Semafor) và "quan chức Mỹ" (WSJ) — không có role thì tin bị loại khỏi S-GPR/Ladder. Đặc phái viên (envoy) vẫn chưa có role.
+- **`ingest/gdelt_events.py` (mới)**: slot 15 phút của GDELT 2.0 Events do collector ghi (`data/gdelt_events/`) → 6 chuỗi daily (`GDELT_EVENTS_N`, `GDELT_QUAD3_SHARE`, `GDELT_QUAD4_SHARE` + bản `WATCH_*` cho các nước theo dõi) vào `ext_series` qua cơ chế vintage. Ngày thiếu slot (< 92/96) bị bỏ, không nạp số thấp giả. `available_at` = hết ngày + 1 giờ.
+- **⚠️ CHƯA nối vào Escalation Ladder**: `news_pipeline._pair_indicator_frame` vẫn để `quad3_pct/quad4_pct` = NaN. Chân C là lớp mới → phải qua cổng incremental IC (#6, #1) trước. Khi qua: phân vị expanding strict `<` qua `load_series(as_of=...)`; ngưỡng đã có trong `config/ladder_v1.yaml`.
+- **Vintage GPR 202610 (2026-10-30)**: daily tới 2026-10-26, monthly tới 2026-09 (file user tải lên). Revise hồi tố cùng mẫu lần trước: 75 ngày / 694 ô tháng, đều từ 2025. `DEFAULT_GPR_*` + default ingest trỏ file mới; file 202608 giữ lại. ⚠️ `_data_version()` đổi theo → report chạy sau có tên mới. AI-GPR **chưa** cập nhật (vẫn hết 2026-07).
+- **Môi trường test**: venv dựng mới kéo `statsmodels 0.15` (bỏ `old_names` → 36 test `shocks`/`dual_component` đỏ) và `pandas 3`. Dùng `statsmodels<0.15`, `pandas<3`, `numpy<2.4` → 516 pass.
+
+## Trạng thái trước đó (2026-08-09)
 
 ### 🐛 Bug data model THẬT, lộ ra ở lần nạp Postgres SỐNG đầu tiên: AI-GPR daily/monthly ghi đè nhau
 
@@ -399,6 +411,7 @@ Phase 1a chạy xong 2026-08-02 (`scripts/run_t2_full.py`). Mẫu **231 tháng**
 
 ⚠️ **Layout đổi 2026-08-08** (commit `e3bde3b`): `data/GPR index/` + `data/AI-GPRs/`. Mọi hằng số `DEFAULT_*` trong `data_files.py`/`ingest/*.py` đã trỏ theo (2026-08-09). Chi tiết đầy đủ + quy tắc đổi vintage: `data/README.md`.
 
+- **Vintage hiện tại (2026-10-30):** `data/GPR index/data_gpr_daily_recent_202610.xls` (daily 1985-01-01 → **2026-10-26**, 15274 dòng) + `data/GPR index/data_gpr_export_202610.xls` (monthly 1900 → **2026-09**, 1521 × 115). Vintage 202608 bên dưới giữ lại cho report cũ.
 - `data/GPR index/data_gpr_daily_recent (1).xls`: GPRD/GPRD_ACT/GPRD_THREAT daily, 15190 dòng, 1985-01-01 → **2026-08-03**. DÙNG ĐƯỢC NGAY. (`(1)` là hậu tố trình duyệt, không phải bản nháp.)
 - `data/GPR index/data_gpr_export_202608.xls` (bản 44 nước): 1519 dòng × 115 cột, monthly 1900 → **2026-07**. Chứa 44 cột `GPRC_*` (recent 1985+) + 44 cột `GPRHC_*` (historical 1900+), gồm cả `GPRC_VNM` và `GPRHC_VNM`. Cột dictionary: `var_name`/`var_label`. File `data_gpr_export (1).xls` cùng thư mục **trùng nội dung** (đã đối chiếu `assert_frame_equal`) — không dùng.
 - `data/AI-GPRs/*.csv`: 2 chỉ số tổng hợp (daily 24319 dòng 1960→2026-07-31, monthly 799 dòng) + 4 file Country Decompositions. Vintage không đổi, chỉ đổi chỗ.
@@ -449,12 +462,13 @@ Report versioned vào `docs/reports/` — **không bao giờ ghi đè** (`FileEx
 psql "$DSN" -f sql/001_schema_core.sql
 psql "$DSN" -f sql/002_schema_serving.sql   # statements/statement_scores/ladder_state/news_assessment
 # --path/--path-daily/--path-monthly đã mặc định đúng file hiện có; ghi ra đây cho rõ.
-python -m gpr_engine.ingest.gpr_daily   --path "data/GPR index/data_gpr_daily_recent (1).xls" --dsn "$DSN"
-python -m gpr_engine.ingest.gpr_monthly --path "data/GPR index/data_gpr_export_202608.xls" --dsn "$DSN"
+python -m gpr_engine.ingest.gpr_daily   --path "data/GPR index/data_gpr_daily_recent_202610.xls" --dsn "$DSN"
+python -m gpr_engine.ingest.gpr_monthly --path "data/GPR index/data_gpr_export_202610.xls" --dsn "$DSN"
 python -m gpr_engine.ingest.market_data   --dsn "$DSN" --source fred   # BRENT/DXY/VIX/US10Y (daily)
 python -m gpr_engine.ingest.macro_monthly --dsn "$DSN"                 # IP/CPI/INFL_EXP/EPU/FREIGHT (monthly)
 python -m gpr_engine.ingest.ai_gpr --dsn "$DSN" \
     --path-daily data/AI-GPRs/ai_gpr_data_daily.csv --path-monthly data/AI-GPRs/ai_gpr_data_monthly.csv
+python -m gpr_engine.ingest.gdelt_events --dsn "$DSN" --path data/gdelt_events   # chân C, slot do collector repport_v2 ghi
 ```
 
 **Chạy pipeline serving thật** (sau khi đã ingest ở trên — cần γ đã có ở `docs/reports/data/t2_full_holm_*.csv`, tức đã chạy `run_t2_full.py` ít nhất một lần):
@@ -478,7 +492,7 @@ docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/001_schema_core.
 docker compose exec -T postgres psql -U gpr -d gpr_engine < sql/002_schema_serving.sql
 # đặt file GPR đã tải vào ./data/ (mount sẵn vào /app/data trong container)
 docker compose run --rm app python -m gpr_engine.ingest.gpr_daily \
-    --path "data/GPR index/data_gpr_daily_recent (1).xls" \
+    --path "data/GPR index/data_gpr_daily_recent_202610.xls" \
     --dsn postgresql://gpr:gpr_dev_password@postgres:5432/gpr_engine
 # tương tự cho ingest.gpr_monthly / ingest.market_data / ingest.ai_gpr
 docker compose up app          # chạy pipeline serving thật (Kafka consumer)

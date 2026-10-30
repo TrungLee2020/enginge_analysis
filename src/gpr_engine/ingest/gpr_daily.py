@@ -71,9 +71,9 @@ def main():
     ap = argparse.ArgumentParser()
     # Vintage 2026-08 (file trong `data/GPR index/`, phu 1985-01-01..2026-08-03).
     # `(1)` la hau to trinh duyet them khi tai — ten that trong thu muc.
-    ap.add_argument("--path", default="data/GPR index/data_gpr_daily_recent (1).xls")
+    ap.add_argument("--path", default="data/GPR index/data_gpr_daily_recent_202610.xls")
     ap.add_argument("--dsn", required=True, help="postgresql://user:pass@host/db")
-    ap.add_argument("--source-version", default="gpr_daily_recent_202608",
+    ap.add_argument("--source-version", default="gpr_daily_recent_202610",
                     help="vintage của file nguồn")
     add_version_args(ap)
     args = ap.parse_args()
