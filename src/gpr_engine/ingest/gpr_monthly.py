@@ -84,9 +84,9 @@ def upsert(long: pd.DataFrame, dsn: str) -> int:
 def main():
     ap = argparse.ArgumentParser()
     # Vintage 2026-08 (file trong `data/GPR index/`, phu 1900-01..2026-07).
-    ap.add_argument("--path", default="data/GPR index/data_gpr_export_202608.xls")
+    ap.add_argument("--path", default="data/GPR index/data_gpr_export_202610.xls")
     ap.add_argument("--dsn", required=True)
-    ap.add_argument("--source-version", default="gpr_export_202608")
+    ap.add_argument("--source-version", default="gpr_export_202610")
     add_version_args(ap)
     args = ap.parse_args()
 

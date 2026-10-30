@@ -25,7 +25,7 @@ CANDIDATES = {
     "ai_bilateral": ["data/ai_gpr_bilateral_monthly.csv",
                      "data/AI-GPRs/ai_gpr_bilateral_monthly.csv"],
     "gpr_daily": ["data/data_gpr_daily_recent.xls",
-                  "data/GPR index/data_gpr_daily_recent (1).xls"],
+                  "data/GPR index/data_gpr_daily_recent (1).xls", "data/GPR index/data_gpr_daily_recent_202610.xls"],
 }
 
 
