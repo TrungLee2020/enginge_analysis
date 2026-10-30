@@ -15,6 +15,9 @@ Bien moi truong (khong sua code de doi):
     GPR_KAFKA_GROUP       mac dinh 'gpr-news-service'
     GPR_KAFKA_TOPIC_IN    mac dinh 'gpr.news.raw'
     GPR_KAFKA_TOPIC_OUT   mac dinh 'gpr.news.assessment'
+    GPR_KAFKA_TOPIC_DLQ   mac dinh 'gpr.news.raw.dlq' — message xu ly hong (nguyen van)
+    GPR_DEAD_LETTER_FILE  mac dinh 'data/dead_letter/gpr_news_raw.jsonl' — fallback
+                          khi publish DLQ cung hong
     GPR_GAMMA_REPORTS_DIR mac dinh 'docs/reports'
     GPR_GAMMA_FILE        tuy chon — ghim ten file bang gamma (mac dinh
                           gamma_lookup.DEFAULT_GAMMA_FILE); khong chon theo mtime
@@ -29,6 +32,7 @@ Chay:  python scripts/run_news_service.py
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import sys
 from pathlib import Path
@@ -48,9 +52,11 @@ from gpr_engine.scoring.statement_scorer import (  # noqa: E402
 )
 from gpr_engine.service import store  # noqa: E402
 from gpr_engine.service.kafka_io import (  # noqa: E402
+    DEFAULT_DLQ_TOPIC,
     DEFAULT_INPUT_TOPIC,
     DEFAULT_OUTPUT_TOPIC,
     confluent_publisher,
+    dead_letter_sink,
     run_consumer_loop,
 )
 
@@ -72,6 +78,8 @@ def _statement_from_payload(payload: dict) -> Statement:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     dsn = _require_env("GPR_DB_DSN")
     _require_env("OPENAI_API_KEY")
     training_cutoff = pd.Timestamp(_require_env("GPR_TRAINING_CUTOFF")).date()
@@ -84,6 +92,9 @@ def main() -> None:
     topic_in = os.environ.get("GPR_KAFKA_TOPIC_IN", DEFAULT_INPUT_TOPIC)
     topic_out = os.environ.get("GPR_KAFKA_TOPIC_OUT", DEFAULT_OUTPUT_TOPIC)
     gamma_dir = os.environ.get("GPR_GAMMA_REPORTS_DIR", "docs/reports")
+    topic_dlq = os.environ.get("GPR_KAFKA_TOPIC_DLQ", DEFAULT_DLQ_TOPIC)
+    dead_letter_file = os.environ.get("GPR_DEAD_LETTER_FILE",
+                                      "data/dead_letter/gpr_news_raw.jsonl")
 
     llm = openai_chat_client(model=model, base_url=base_url)
     config = ScorerConfig(model_version=model_version, training_cutoff=training_cutoff)
@@ -110,7 +121,10 @@ def main() -> None:
         publisher.publish(topic_out, key, {"excluded": False, **result.as_dict()})
 
     print(f"[run_news_service] {topic_in} -> {topic_out} @ {bootstrap} (group={group})")
-    run_consumer_loop(bootstrap, group, topic_in, handler)
+    # Message hong (role la, LLM/DB/publish loi...) -> DLQ nguyen van roi moi
+    # commit offset; khong mat im lang, khong retry vo han mot poison pill.
+    dead_letter = dead_letter_sink(publisher, topic_dlq, fallback_path=dead_letter_file)
+    run_consumer_loop(bootstrap, group, topic_in, handler, dead_letter=dead_letter)
 
 
 if __name__ == "__main__":
