@@ -56,10 +56,17 @@ Chạy trong thư mục engine trên server, ví dụ `/opt/enginge_analysis`.
 
    ```
    GPR_DB_DSN=postgresql://postgres:<mật khẩu>@shared-postgres-report:5432/gpr_engine
-   OPENAI_API_KEY=...            # hoặc OPENAI_BASE_URL=http://<vllm>/v1 + key của vLLM
+   OPENAI_API_KEY=...            # OpenAI thật: bắt buộc
+   # vLLM: OPENAI_BASE_URL=http://<vllm>/v1; OPENAI_API_KEY bỏ trống thì dùng 'EMPTY'
+   # (vLLM không bật --api-key), bật --api-key thì đặt đúng key đó
    GPR_LLM_MODEL=gpt-4o-mini     # hoặc tên model trên vLLM
    GPR_TRAINING_CUTOFF=2026-01-01
+   # GPR_GAMMA_FILE=t2_full_holm_3e1bd83a02b8_cb1a51.csv   # tùy chọn, đây là mặc định
    ```
+
+   Bảng γ phục vụ được GHIM (`gamma_lookup.DEFAULT_GAMMA_FILE`, đè bằng `GPR_GAMMA_FILE`),
+   không chọn "file mới nhất": trong ảnh có 3 file `t2_full_holm_*.csv` và mtime sau `COPY`
+   là thứ tự checkout, không phải thời điểm tạo bảng.
 
    Host trong DSN là `shared-postgres-report`, không phải `localhost`: bên trong container,
    `localhost` là chính container app. Kafka không đặt ở đây; `docker-compose.prod.yml` cố định
@@ -73,6 +80,14 @@ Chạy trong thư mục engine trên server, ví dụ `/opt/enginge_analysis`.
 
    ```bash
    docker exec <kafka-container> /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic gpr.news.assessment --partitions 1 --replication-factor 1
+   ```
+
+   Dead-letter: message xử lý hỏng (role lạ, LLM/DB/publish lỗi, JSON hỏng) được ghi
+   nguyên văn vào `gpr.news.raw.dlq` rồi mới commit offset; publish DLQ cũng hỏng thì ghi
+   `data/dead_letter/gpr_news_raw.jsonl` (volume `./data`).
+
+   ```bash
+   docker exec <kafka-container> /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic gpr.news.raw.dlq --partitions 1 --replication-factor 1
    ```
 
 5. Build, nạp dữ liệu chân A, chạy:
@@ -100,6 +115,47 @@ Chạy trong thư mục engine trên server, ví dụ `/opt/enginge_analysis`.
   docker compose -f docker-compose.prod.yml run --rm app sh -c 'python -m gpr_engine.ingest.gdelt_events --path data/gdelt_events --dsn "$GPR_DB_DSN"'
   ```
 
+  **Chưa có gì tự chạy lệnh này** — compose chỉ chạy `app`, không có timer. Phải tự đặt lịch
+  trên host, một trong hai cách (sửa `/opt/enginge_analysis` cho đúng thư mục engine):
+
+  cron (`crontab -e` của user có quyền docker; giờ theo TZ của host, ví dụ host chạy UTC):
+
+  ```
+  30 1 * * * cd /opt/enginge_analysis && docker compose -f docker-compose.prod.yml run --rm app sh -c 'python -m gpr_engine.ingest.gdelt_events --path data/gdelt_events --dsn "$GPR_DB_DSN"' >> /var/log/gpr-gdelt-ingest.log 2>&1
+  ```
+
+  hoặc systemd — `/etc/systemd/system/gpr-gdelt-ingest.service`:
+
+  ```ini
+  [Unit]
+  Description=GPR engine: ingest GDELT Events (chan C)
+  After=docker.service
+  Requires=docker.service
+
+  [Service]
+  Type=oneshot
+  WorkingDirectory=/opt/enginge_analysis
+  ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml run --rm app sh -c 'python -m gpr_engine.ingest.gdelt_events --path data/gdelt_events --dsn "$GPR_DB_DSN"'
+  ```
+
+  và `/etc/systemd/system/gpr-gdelt-ingest.timer`:
+
+  ```ini
+  [Unit]
+  Description=Daily GDELT Events ingest after 01:00 UTC
+
+  [Timer]
+  OnCalendar=*-*-* 01:30:00 UTC
+  Persistent=true
+
+  [Install]
+  WantedBy=timers.target
+  ```
+
+  ```bash
+  sudo systemctl daemon-reload && sudo systemctl enable --now gpr-gdelt-ingest.timer
+  ```
+
 - **Vintage GPR mới** (file tải tay): commit file vào `data/GPR index/` theo `data/README.md`,
   rồi chạy lại hai lệnh ingest `gpr_daily` / `gpr_monthly` — `versioning.py` archive giá trị bị
   revise.
@@ -110,7 +166,9 @@ Chạy trong thư mục engine trên server, ví dụ `/opt/enginge_analysis`.
 docker logs --tail 20 gpr-engine-app
 ```
 
-Dòng đầu phải là `[run_news_service] gpr.news.raw -> gpr.news.assessment @ kafka:29092`.
+Phải có dòng `[run_news_service] gpr.news.raw -> gpr.news.assessment @ kafka:29092 (group=gpr-news-service)`.
+Message xử lý hỏng hiện ở dạng `ERROR gpr_engine.service.kafka_io [kafka_io] handler failed topic=... offset=...`
+và nằm trong topic `gpr.news.raw.dlq`.
 Sau khi collector repport_v2 publish (`collect_gpr.py publish`), bảng `news_assessment` có hàng mới:
 
 ```bash
