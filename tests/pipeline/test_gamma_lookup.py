@@ -78,24 +78,69 @@ def test_missing_file_raises(tmp_path):
         load_published_gamma("act", reports_dir=tmp_path)
 
 
-def test_picks_most_recently_MODIFIED_file_not_alphabetically_last(tmp_path):
-    """Bug da va (audit production-readiness 2026-08-05): ten file mang HASH
-    NOI DUNG (t2_full_holm_<hash>.csv), khong mang thu tu thoi gian. Ban cu
-    sort()[-1] chon file "cuoi cung theo alphabet" — chon SAI khi file MOI
-    HON co hash sap truoc file CU HON theo alphabet. Dung mtime moi dung
-    nghia "moi nhat" — kich ban thuc te khi chay lai run_t2_full.py nhieu
-    lan theo thoi gian (du lieu GPR ve dinh ky)."""
-    import time
+def _two_tables(tmp_path):
+    """Hai bang: file CU co mtime MOI HON (dung kich ban clone/COPY Docker:
+    mtime = thu tu checkout, khong phai thoi diem tao bang)."""
+    import os
 
     d = tmp_path / "data"
     d.mkdir()
-    old = d / "t2_full_holm_zzz_old.csv"     # sap SAU theo alphabet nhung CU HON
-    new = d / "t2_full_holm_aaa_new.csv"     # sap TRUOC theo alphabet nhung MOI HON
-    old.write_text(CSV_HEADER + "\n" + ROWS[0] + "\n", encoding="utf-8")
-    time.sleep(0.01)
-    new_row = ROWS[0].replace(",oil,", ",vix,")   # noi dung khac de phan biet duoc file nao duoc doc
-    new.write_text(CSV_HEADER + "\n" + new_row + "\n", encoding="utf-8")
+    pinned = d / "t2_full_holm_aaa_pinned.csv"
+    stale = d / "t2_full_holm_zzz_stale.csv"
+    pinned.write_text(CSV_HEADER + "\n" + ROWS[0] + "\n", encoding="utf-8")
+    stale_row = ROWS[0].replace(",oil,", ",vix,")
+    stale.write_text(CSV_HEADER + "\n" + stale_row + "\n", encoding="utf-8")
+    os.utime(pinned, (1_000_000_000, 1_000_000_000))
+    os.utime(stale, (2_000_000_000, 2_000_000_000))  # stale "moi" hon theo mtime
+    return pinned, stale
 
+
+def test_several_tables_without_pin_raise_instead_of_picking_by_mtime(tmp_path, monkeypatch):
+    """Bug da va (pre-deploy 2026-10-30): ban cu chon max(st_mtime). Trong
+    git co 3 file t2_full_holm_*.csv; tren clone moi / COPY cua Docker, mtime
+    la thu tu checkout -> co the phuc vu bang gamma CU ma khong dau hieu gi.
+    Nhieu file + khong ghim = raise, khong doan."""
+    monkeypatch.delenv("GPR_GAMMA_FILE", raising=False)
+    _two_tables(tmp_path)
+    with pytest.raises(RuntimeError, match="GPR_GAMMA_FILE"):
+        load_published_gamma("act", reports_dir=tmp_path)
+
+
+def test_pin_by_env_wins_over_mtime(tmp_path, monkeypatch):
+    pinned, _ = _two_tables(tmp_path)
+    monkeypatch.setenv("GPR_GAMMA_FILE", pinned.name)
     cells, fname = load_published_gamma("act", reports_dir=tmp_path)
-    assert fname == "t2_full_holm_aaa_new.csv"
-    assert cells[0].outcome.startswith("vix")
+    assert fname == pinned.name
+    assert cells[0].outcome.startswith("oil")
+
+
+def test_pin_by_argument_wins_over_env(tmp_path, monkeypatch):
+    pinned, stale = _two_tables(tmp_path)
+    monkeypatch.setenv("GPR_GAMMA_FILE", stale.name)
+    _, fname = load_published_gamma("act", reports_dir=tmp_path,
+                                    gamma_file=pinned.name)
+    assert fname == pinned.name
+
+
+def test_explicit_pin_missing_raises(tmp_path, monkeypatch):
+    _two_tables(tmp_path)
+    monkeypatch.setenv("GPR_GAMMA_FILE", "t2_full_holm_nope.csv")
+    with pytest.raises(FileNotFoundError, match="nope"):
+        load_published_gamma("act", reports_dir=tmp_path)
+
+
+def test_default_pin_exists_in_repo_and_is_served(monkeypatch):
+    """Bang gamma ghim mac dinh phai co trong repo — va duoc chon du cac
+    bang khac co mtime moi hon."""
+    from pathlib import Path
+
+    from gpr_engine.pipeline.gamma_lookup import (
+        DEFAULT_GAMMA_FILE,
+        DEFAULT_REPORTS_DIR,
+    )
+    monkeypatch.delenv("GPR_GAMMA_FILE", raising=False)
+    root = Path(__file__).resolve().parents[2]
+    reports = root / DEFAULT_REPORTS_DIR
+    assert (reports / "data" / DEFAULT_GAMMA_FILE).is_file()
+    _, fname = load_published_gamma("pooled", reports_dir=reports)
+    assert fname == DEFAULT_GAMMA_FILE

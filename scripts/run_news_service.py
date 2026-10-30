@@ -16,6 +16,8 @@ Bien moi truong (khong sua code de doi):
     GPR_KAFKA_TOPIC_IN    mac dinh 'gpr.news.raw'
     GPR_KAFKA_TOPIC_OUT   mac dinh 'gpr.news.assessment'
     GPR_GAMMA_REPORTS_DIR mac dinh 'docs/reports'
+    GPR_GAMMA_FILE        tuy chon — ghim ten file bang gamma (mac dinh
+                          gamma_lookup.DEFAULT_GAMMA_FILE); khong chon theo mtime
 
 Schema JSON tren topic input (khop `scoring.statement_scorer.Statement`):
     {"source": str, "url": str|null, "published_at": "ISO8601", "speaker": str,
