@@ -95,6 +95,30 @@ def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
 
+class UnknownSpeakerRoleError(ValueError):
+    """`speaker_role` khong co trong w(role) — tu choi o RANH GIOI consumer,
+    TRUOC khi ghi DB (xem `process_news_item_live`)."""
+
+
+def check_speaker_role(stmt: Statement,
+                       role_weights: Mapping[str, float] | None = None) -> None:
+    """Raise UnknownSpeakerRoleError neu role cua tin khong co trong w(role).
+
+    Vi sao chan o day ma khong de `process_news_item` suy giam mem: mot hang
+    `statements` mang role la, mot khi da ghi, nam trong lich su cua CAP do
+    vinh vien — moi tin SAU tren cung cap nap lich su do vao `s_gpr_pair` va
+    `_role_weights_series` raise KeyError, tuc mot tin hong lam hong S-GPR/
+    Ladder cua ca cap (pre-deploy audit 2026-10-30). Them role moi la chu ky
+    moi trong w(role) (CLAUDE.md #7), khong phai ghi tam roi tinh sau.
+    """
+    weights = DEFAULT_ROLE_WEIGHTS_INIT if role_weights is None else role_weights
+    if stmt.speaker_role not in weights:
+        raise UnknownSpeakerRoleError(
+            f"speaker_role={stmt.speaker_role!r} không có trong w(role) "
+            f"{sorted(weights)} — từ chối, KHÔNG ghi DB (source={stmt.source!r}, "
+            f"url={stmt.url!r}).")
+
+
 @dataclass(frozen=True)
 class ExcludedResult:
     """Tin bi encoder loc — khong cham, khong tinh gi them (statement_scorer.score_statement trả None)."""
@@ -382,6 +406,9 @@ def process_news_item_live(
     from ..service import store
     from .gamma_lookup import load_published_gamma
 
+    # Role la -> raise TRUOC moi I/O (khong goi LLM, khong ghi statements/
+    # statement_scores). Caller (kafka_io) dua message vao dead-letter.
+    check_speaker_role(stmt)
     if engine is None:
         engine = store.get_engine(dsn)
     ladder_cfg = load_ladder_config(ladder_config_path)

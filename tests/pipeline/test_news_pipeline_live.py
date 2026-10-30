@@ -12,7 +12,12 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from gpr_engine.pipeline.news_pipeline import process_news_item_live
+from gpr_engine.indices.s_gpr import DEFAULT_ROLE_WEIGHTS_INIT
+from gpr_engine.pipeline.news_pipeline import (
+    UnknownSpeakerRoleError,
+    check_speaker_role,
+    process_news_item_live,
+)
 from gpr_engine.reporting.composer import GammaCell
 from gpr_engine.scoring.statement_scorer import ScorerConfig, Statement
 
@@ -67,17 +72,32 @@ def test_ladder_state_persisted_when_computation_succeeds(mocked_store):
     assert args[3] == result.ladder_state  # dung gia tri THAT, khong phai 0 mac dinh
 
 
-def test_ladder_state_NOT_persisted_when_role_unknown(mocked_store):
-    """Bug da vá: truoc day ham nay ghi ladder_state=0 (gia) de len DB khi vai
-    tro la, co the de len mot trang thai DUNG da co truoc do cua ngay hom do."""
-    result = process_news_item_live(_stmt(speaker_role="unknown_xyz"),
-                                    "postgresql://fake", _llm, CONFIG)
-    assert result.ladder_computed is False
-    assert result.measurement_card_error is not None
+def test_unknown_role_rejected_before_anything_is_persisted(mocked_store):
+    """Bug da vá (pre-deploy 2026-10-30): truoc day tin co role la van duoc ghi
+    vao statements/statement_scores; tu do MOI tin sau tren cung cap nap lich
+    su do va `s_gpr._role_weights_series` raise KeyError — mot tin hong lam
+    hong ca cap. Gio raise o ranh gioi, khong goi LLM, khong ghi gi; tin
+    khong mat vi kafka_io dua message vao dead-letter."""
+    calls = []
+
+    def llm(messages, temperature):
+        calls.append(1)
+        return _llm(messages, temperature)
+
+    with patch("gpr_engine.service.store.insert_statement") as m_stmt:
+        with pytest.raises(UnknownSpeakerRoleError, match="unknown_xyz"):
+            process_news_item_live(_stmt(speaker_role="unknown_xyz"),
+                                   "postgresql://fake", llm, CONFIG)
+    assert calls == []
+    m_stmt.assert_not_called()
+    mocked_store["score"].assert_not_called()
     mocked_store["ladder"].assert_not_called()
-    # nhung statement/score/assessment van phai duoc ghi — khong mat tin
-    mocked_store["score"].assert_called_once()
-    mocked_store["assess"].assert_called_once()
+    mocked_store["assess"].assert_not_called()
+
+
+def test_known_roles_from_registry_pass_the_boundary_check():
+    for role in DEFAULT_ROLE_WEIGHTS_INIT:
+        check_speaker_role(_stmt(speaker_role=role))  # khong raise
 
 
 def test_engine_created_lazily_when_not_injected_backward_compat(mocked_store):
