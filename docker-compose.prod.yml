@@ -18,9 +18,9 @@
 #   docker compose -f docker-compose.prod.yml run --rm app python -m gpr_engine.ingest.gpr_daily --dsn "<DSN>"
 #   docker compose -f docker-compose.prod.yml up -d app
 #
-# .env (cùng thư mục) BẮT BUỘC có: GPR_DB_DSN, GPR_TRAINING_CUTOFF, và OPENAI_API_KEY —
-# trừ khi đặt OPENAI_BASE_URL tới vLLM (khi đó key thiếu thì run_news_service.py dùng
-# 'EMPTY'; vLLM bật --api-key thì đặt OPENAI_API_KEY bằng key đó). GPR_DB_DSN trỏ host `shared-postgres-report:5432`, KHÔNG
+# .env (cùng thư mục) BẮT BUỘC có: GPR_DB_DSN, GPR_TRAINING_CUTOFF, và ANTHROPIC_API_KEY
+# (mặc định GPR_LLM_MODEL=claude-haiku-5-5). Đặt GPR_LLM_MODEL khác claude-* thì cần
+# OPENAI_API_KEY, trừ khi đặt OPENAI_BASE_URL tới vLLM (key thiếu thì dùng 'EMPTY'). GPR_DB_DSN trỏ host `shared-postgres-report:5432`, KHÔNG
 # phải localhost (localhost trong container là chính container app).
 
 services:

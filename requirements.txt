@@ -28,6 +28,7 @@ pandas-datareader>=0.10  # FRED
 
 # --- LLM scoring (chân B: statement_scorer.py) ---
 openai>=1.40
+anthropic>=2.3,<3   # Claude (GPR_LLM_MODEL=claude-*): anthropic_chat_client
 
 # --- Serving (service/kafka_io.py): "1 tin vào -> 1 kết quả ra" đẩy Kafka ---
 confluent-kafka>=2.3

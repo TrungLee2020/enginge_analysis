@@ -56,10 +56,12 @@ Chạy trong thư mục engine trên server, ví dụ `/opt/enginge_analysis`.
 
    ```
    GPR_DB_DSN=postgresql://postgres:<mật khẩu>@shared-postgres-report:5432/gpr_engine
-   OPENAI_API_KEY=...            # OpenAI thật: bắt buộc
-   # vLLM: OPENAI_BASE_URL=http://<vllm>/v1; OPENAI_API_KEY bỏ trống thì dùng 'EMPTY'
-   # (vLLM không bật --api-key), bật --api-key thì đặt đúng key đó
-   GPR_LLM_MODEL=gpt-4o-mini     # hoặc tên model trên vLLM
+   ANTHROPIC_API_KEY=sk-ant-...  # bắt buộc với model claude-* (mặc định)
+   GPR_LLM_MODEL=claude-haiku-5-5
+   # GPR_LLM_EFFORT=medium       # effort của Claude, mặc định medium
+   # Model khác claude-* đi qua OpenAI SDK: OPENAI_API_KEY (OpenAI thật), hoặc
+   # OPENAI_BASE_URL=http://<vllm>/v1 (key bỏ trống thì dùng 'EMPTY').
+   # Đổi model là đổi model_version -> điểm cũ trong cache không dùng lại (cố ý).
    GPR_TRAINING_CUTOFF=2026-01-01
    # GPR_GAMMA_FILE=t2_full_holm_3e1bd83a02b8_cb1a51.csv   # tùy chọn, đây là mặc định
    ```

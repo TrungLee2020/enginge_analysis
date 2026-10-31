@@ -6,10 +6,14 @@ voi `service.kafka_io` — day la ban THAT cua chuoi "1 tin vao -> 1 ket qua ra"
 
 Bien moi truong (khong sua code de doi):
     GPR_DB_DSN            bat buoc — 'postgresql://user:pass@host/db'
-    OPENAI_API_KEY        bat buoc KHI KHONG co OPENAI_BASE_URL; co OPENAI_BASE_URL
-                          (vd vLLM khong bat --api-key) ma thieu key thi dung 'EMPTY'
+    GPR_LLM_MODEL         mac dinh 'claude-haiku-5-5' — doi model KHONG can sua code;
+                          'claude-*' -> Anthropic SDK, con lai -> OpenAI SDK
+    ANTHROPIC_API_KEY     bat buoc khi GPR_LLM_MODEL la 'claude-*'
+    GPR_LLM_EFFORT        mac dinh 'medium' — effort cua Claude (low|medium|high|...)
+    OPENAI_API_KEY        (model khong phai claude-*) bat buoc KHI KHONG co
+                          OPENAI_BASE_URL; co OPENAI_BASE_URL (vd vLLM khong bat
+                          --api-key) ma thieu key thi dung 'EMPTY'
     OPENAI_BASE_URL       tuy chon — tro sang endpoint OpenAI-compatible khac
-    GPR_LLM_MODEL         mac dinh 'gpt-4o-mini' — doi model KHONG can sua code
     GPR_MODEL_VERSION     mac dinh = GPR_LLM_MODEL — vao statement_scores.model_version
     GPR_TRAINING_CUTOFF   bat buoc, ISO date — contamination guard (docs/14 §3.1.4)
     GPR_KAFKA_BOOTSTRAP   bat buoc — 'host1:9092,host2:9092'
@@ -47,8 +51,10 @@ from gpr_engine.pipeline.news_pipeline import (  # noqa: E402
     process_news_item_live,
 )
 from gpr_engine.scoring.statement_scorer import (  # noqa: E402
+    LLMClient,
     ScorerConfig,
     Statement,
+    anthropic_chat_client,
     openai_chat_client,
 )
 from gpr_engine.service import store  # noqa: E402
@@ -69,6 +75,27 @@ def _require_env(name: str) -> str:
     return val
 
 
+DEFAULT_LLM_MODEL = "claude-haiku-5-5"
+
+
+def build_llm_client(model: str) -> LLMClient:
+    """Chon client theo ten model: 'claude-*' -> Anthropic SDK (ANTHROPIC_API_KEY,
+    bat buoc); con lai -> OpenAI SDK (OpenAI that hoac endpoint tuong thich
+    OpenAI qua OPENAI_BASE_URL, vd vLLM)."""
+    if model.startswith("claude-"):
+        api_key = _require_env("ANTHROPIC_API_KEY")
+        effort = os.environ.get("GPR_LLM_EFFORT", "medium")
+        return anthropic_chat_client(model=model, api_key=api_key, effort=effort)
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    # OpenAI SDK raise neu api_key None. vLLM khong bat --api-key nhan bat ky
+    # chuoi nao — quy uoc 'EMPTY'. Khong co base_url thi la OpenAI that: bat buoc.
+    api_key = os.environ.get("OPENAI_API_KEY") or ("EMPTY" if base_url else None)
+    if not api_key:
+        raise RuntimeError("Thiếu biến môi trường bắt buộc: OPENAI_API_KEY "
+                           "(hoặc đặt OPENAI_BASE_URL tới endpoint không cần key)")
+    return openai_chat_client(model=model, base_url=base_url, api_key=api_key)
+
+
 def _statement_from_payload(payload: dict) -> Statement:
     return Statement(
         source=payload["source"], url=payload.get("url"),
@@ -85,15 +112,9 @@ def main() -> None:
     training_cutoff = pd.Timestamp(_require_env("GPR_TRAINING_CUTOFF")).date()
     bootstrap = _require_env("GPR_KAFKA_BOOTSTRAP")
 
-    model = os.environ.get("GPR_LLM_MODEL", "gpt-4o-mini")
+    model = os.environ.get("GPR_LLM_MODEL", DEFAULT_LLM_MODEL)
     model_version = os.environ.get("GPR_MODEL_VERSION", model)
-    base_url = os.environ.get("OPENAI_BASE_URL")
-    # OpenAI SDK raise neu api_key None. vLLM khong bat --api-key nhan bat ky
-    # chuoi nao — quy uoc 'EMPTY'. Khong co base_url thi la OpenAI that: bat buoc.
-    api_key = os.environ.get("OPENAI_API_KEY") or ("EMPTY" if base_url else None)
-    if not api_key:
-        raise RuntimeError("Thiếu biến môi trường bắt buộc: OPENAI_API_KEY "
-                           "(hoặc đặt OPENAI_BASE_URL tới endpoint không cần key)")
+    llm = build_llm_client(model)
     group = os.environ.get("GPR_KAFKA_GROUP", "gpr-news-service")
     topic_in = os.environ.get("GPR_KAFKA_TOPIC_IN", DEFAULT_INPUT_TOPIC)
     topic_out = os.environ.get("GPR_KAFKA_TOPIC_OUT", DEFAULT_OUTPUT_TOPIC)
@@ -102,7 +123,6 @@ def main() -> None:
     dead_letter_file = os.environ.get("GPR_DEAD_LETTER_FILE",
                                       "data/dead_letter/gpr_news_raw.jsonl")
 
-    llm = openai_chat_client(model=model, base_url=base_url, api_key=api_key)
     config = ScorerConfig(model_version=model_version, training_cutoff=training_cutoff)
     publisher = confluent_publisher(bootstrap)
 
