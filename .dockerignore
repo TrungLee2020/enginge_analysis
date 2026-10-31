@@ -4,6 +4,7 @@
 .git
 .gitignore
 .venv
+.venv-win
 .pytest_cache
 .ruff_cache
 .serena

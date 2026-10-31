@@ -9,3 +9,15 @@ data/cache/
 *.egg-info/
 dist/
 .venv/
+.venv-win/
+
+# Du lieu tai tay / cache tren may dev (khong thuoc vintage commit trong repo)
+data/deregulation/
+data/fred/
+data/papers/
+
+# Sinh ra khi chay tren server
+# fallback DLQ cua run_news_service (nguyen van tin hong)
+data/dead_letter/
+# diem mount chi doc tu repport_v2 (docker-compose.prod.yml)
+data/gdelt_events/
