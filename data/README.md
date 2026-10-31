@@ -50,17 +50,31 @@ Chỉ số tổng hợp (`DEFAULT_AI_GPR_DAILY` / `_MONTHLY`):
 
 | File | Kích thước | Nhịp | Phủ | Vintage |
 |---|---|---|---|---|
-| `ai_gpr_data_daily.csv` | 24.319 × 15 | daily | 1960-01-01 → 2026-07-31 | `13b8e8b48d41` |
-| `ai_gpr_data_monthly.csv` | 799 × 15 | monthly | 1960-01 → 2026-07 | `92b9ba3bd38f` |
+| `ai_gpr_data_daily.csv` | 24.380 × 17 | daily | 1960-01-01 → **2026-09-30** | `126826a65254` |
+| `ai_gpr_data_monthly.csv` | 801 × 17 | monthly | 1960-01 → **2026-09** | `21de8ff5cca3` |
 
 Country Decompositions (4 file, đã có loader trong `data_files.py`):
 
 | File | Kích thước | Nhịp | Phủ | Vintage |
 |---|---|---|---|---|
-| `ai_gpr_eventtype_monthly.csv` | 799 × 10 | monthly | 1960-01 → 2026-07 | `4e6ad63e48c7` |
-| `ai_gpr_country_monthly.csv` | 799 × 802 | monthly | 1960-01 → 2026-07 | `22750ad1e1bf` |
-| `ai_gpr_country_eventtype_monthly.csv` | 799 × 1.602 | monthly | 1960-01 → 2026-07 | `dd4bace497a0` |
-| `ai_gpr_bilateral_monthly.csv` | 799 × 1.202 | monthly | 1960-01 → 2026-07 | `e3c6185d0e40` |
+| `ai_gpr_eventtype_monthly.csv` | 801 × 10 | monthly | 1960-01 → 2026-09 | `93aa349662ce` |
+| `ai_gpr_country_monthly.csv` | 801 × 802 | monthly | 1960-01 → 2026-09 | `03b2c081e404` |
+| `ai_gpr_country_eventtype_monthly.csv` | 800 × 1.602 | monthly | 1960-01 → **2026-08** (chậm 1 tháng so với 3 file kia — đúng như nguồn) | `c197dea8ce7e` |
+| `ai_gpr_bilateral_monthly.csv` | 801 × 1.202 | monthly | 1960-01 → 2026-09 | `50dce47fc524` |
+
+**Vintage tải 2026-10-31** (thay vintage 2026-08-05; file AI-GPR không mang vintage trong
+tên — bản cũ lấy lại từ git history). Đối chiếu với bản cũ trên phần chồng lấp:
+
+- **Schema thêm 2 cột:** `GPR_OIL_THREATS`, `GPR_OIL_ACTS`. Loader/ingest chỉ chọn cột
+  trong `AI_GPR_COLUMNS` nên cột mới bị bỏ qua — **chưa ingest**, thêm là việc riêng.
+- **`THREATS_GPR_AI` / `ACTS_GPR_AI` bị tính lại TOÀN lịch sử từ 1960** (daily: 9.467 và
+  4.793 / 24.319 ngày; monthly: 673 và 625 / 799 tháng). Độ lớn nhỏ (median |Δ| daily
+  0,01 / 1,84; corr cũ–mới 0,9997 / 0,9998) nhưng đây là **đổi phương pháp ở nguồn**,
+  không phải revise tháng gần — khác hẳn mẫu GPR index (lịch sử sâu đóng băng).
+  Kết quả research nào dùng hai chuỗi này chạy trên vintage cũ sẽ không tái lập được bằng
+  file hiện tại.
+- Các chuỗi khác (`GPR_AI`, `GPR_AER`, `GPR_OIL*`, `GPR_NONOIL`): chỉ revise từ 2026-01
+  trở đi (≤ 29 ngày), cùng kiểu revise tháng gần.
 
 ⚠️ **Bốn file "Country Decompositions" (country/bilateral/eventtype) là MONTHLY** —
 nguyên tắc #10 cấm forward-fill xuống daily, nên chúng chỉ vào track tháng.
