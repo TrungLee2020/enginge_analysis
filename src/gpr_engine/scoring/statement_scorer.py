@@ -36,6 +36,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import re
 from collections.abc import Callable, Iterable, MutableMapping
 from dataclasses import dataclass
 from typing import Any
@@ -412,5 +413,63 @@ def openai_chat_client(model: str = "gpt-4o-mini",
             model=model, messages=messages, temperature=temperature,
             response_format={"type": "json_object"})
         return resp.choices[0].message.content or ""
+
+    return _call
+
+
+class LLMRefusalError(RuntimeError):
+    """Model tu choi / bi cat (stop_reason refusal | max_tokens) — khong co
+    output de cham. Raise de caller ghi that bai (DLQ), khong nhet chuoi rong
+    vao vong retry parse_score."""
+
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL | re.IGNORECASE)
+
+
+def anthropic_chat_client(model: str = "claude-haiku-5-5",
+                          api_key: str | None = None,
+                          effort: str = "medium",
+                          max_tokens: int = 16000) -> LLMClient:
+    """LLMClient dua tren Anthropic SDK (Claude Messages API) — cung chu ky
+    `LLMClient` voi `openai_chat_client`, thay the duoc cho nhau.
+
+    Khac OpenAI o 3 cho, xu ly o day chu khong o caller:
+    - message role "system" tach ra tham so `system` (Messages API khong nhan
+      role system o dau `messages`).
+    - `temperature` KHONG gui: Claude Haiku 5.5 tu choi gia tri sampling khac
+      mac dinh, SDK 2.x bo han tham so. `temperature` van nam trong
+      `content_hash`/metadata nhu mot TRUC VERSION, khong phai tham so goi.
+    - Khong co JSON mode kieu `response_format`: prompt da yeu cau strict JSON,
+      o day chi boc lop rao ```json ... ``` (lop van chuyen, giong viec JSON
+      mode cua OpenAI) — noi dung van do `parse_score` kiem STRICT, khong sua ho.
+
+    Thinking adaptive bat mac dinh tren Haiku 5.5; `effort` dat TUONG MINH vi
+    mac dinh cua model nay la 'medium' (khac cac model khac). Chi lay block
+    `text` (bo qua block `thinking`). `api_key` None -> SDK tu doc
+    `ANTHROPIC_API_KEY`. Import luoi de test/offline khong can package.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+
+    def _call(messages: list[dict[str, str]], temperature: float) -> str:
+        del temperature  # truc version, khong phai tham so goi (xem docstring)
+        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        chat = [{"role": m["role"], "content": m["content"]}
+                for m in messages if m["role"] != "system"]
+        kwargs: dict[str, Any] = {
+            "model": model, "max_tokens": max_tokens, "messages": chat,
+            "output_config": {"effort": effort},
+        }
+        if system:
+            kwargs["system"] = system
+        resp = client.messages.create(**kwargs)
+        if resp.stop_reason in ("refusal", "max_tokens"):
+            raise LLMRefusalError(
+                f"Claude stop_reason={resp.stop_reason} (model={model}, "
+                f"request_id={getattr(resp, '_request_id', None)})")
+        text = "".join(b.text for b in resp.content if b.type == "text").strip()
+        m = _JSON_FENCE_RE.match(text)
+        return m.group(1).strip() if m else text
 
     return _call
